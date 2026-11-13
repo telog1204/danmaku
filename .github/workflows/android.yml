@@ -1,8 +1,7 @@
 name: Android
 
+# push のたびには動かさず、必要なときだけ手動で動かす（Actions の画面の「Run workflow」など）
 on:
-  push:
-    branches: ['**']
   workflow_dispatch:
 
 env:
