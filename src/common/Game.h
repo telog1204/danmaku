@@ -12,5 +12,6 @@ public:
 
 private:
     World world_;
-    bool prevPrimaryDown_ = false;  // 前のフレームで主な操作が続いていたか（押した瞬間を見分けるため）
+    bool prevPrimaryDown_ = false;    // 前のフレームで主な操作が続いていたか（押した瞬間を見分けるため）
+    bool prevSecondaryDown_ = false;  // 前のフレームで2つ目の操作が続いていたか
 };
