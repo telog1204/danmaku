@@ -1,4 +1,5 @@
 #pragma once
+#include "BuildScreen.h"
 #include "World.h"
 
 // ゲーム本体。RunGame（GameLoop.cpp）が毎フレーム Update と Draw を呼ぶ。両OSで共通
@@ -11,7 +12,14 @@ public:
     void Draw();
 
 private:
+    enum class Mode {
+        Battle,  // 戦闘中
+        Build,   // 組み込み画面を開いている（時間が止まる）
+    };
+
     World world_;
+    BuildScreen buildScreen_;
+    Mode mode_ = Mode::Battle;
     bool prevPrimaryDown_ = false;    // 前のフレームで主な操作が続いていたか（押した瞬間を見分けるため）
     bool prevSecondaryDown_ = false;  // 前のフレームで2つ目の操作が続いていたか
 };

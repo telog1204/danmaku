@@ -12,22 +12,45 @@ void Game::Update(double dtSeconds) {
     const bool secondaryPressed = input.secondaryDown && !prevSecondaryDown_;
     prevPrimaryDown_ = input.primaryDown;
     prevSecondaryDown_ = input.secondaryDown;
+    const float dt = static_cast<float>(dtSeconds);
 
-    // 右クリック（2本指タップ）で、開始時の武装を切り替えて最初からやり直す（組み込み画面ができるまでの試し用）
+    // 組み込み画面を開いている間は、ゲームの時間を進めない
+    if (mode_ == Mode::Build) {
+        if (buildScreen_.Update(world_, pressed, input.x, input.y, dt)) {
+            mode_ = Mode::Battle;
+        }
+        return;
+    }
+
+    // 右クリック（2本指タップ）で、開始時の武装を切り替えて最初からやり直す（拾う仕組みができるまでの試し用）
     if (secondaryPressed) {
         world_.ResetWithNextStartWeapon();
         return;
     }
 
-    // ゲームオーバーのあと少し待ってから、タップ（クリック）で最初からやり直す
-    if (world_.IsGameOver() && world_.GameOverSeconds() >= Config::RestartDelay && pressed) {
-        world_.Reset();
+    if (world_.IsGameOver()) {
+        // ゲームオーバーのあと少し待ってから、タップ（クリック）で最初からやり直す
+        if (world_.GameOverSeconds() >= Config::RestartDelay && pressed) {
+            world_.Reset();
+            return;
+        }
+    } else if (pressed && BuildScreen::HitOpenButton(input.x, input.y)) {
+        // 「組み込み」ボタンで組み込み画面を開き、時間を止める
+        buildScreen_.Open();
+        mode_ = Mode::Build;
         return;
     }
 
-    world_.Update(static_cast<float>(dtSeconds));
+    world_.Update(dt);
 }
 
 void Game::Draw() {
+    if (mode_ == Mode::Build) {
+        buildScreen_.Draw(world_);
+        return;
+    }
     DrawWorld(world_);
+    if (!world_.IsGameOver()) {
+        BuildScreen::DrawOpenButton();
+    }
 }

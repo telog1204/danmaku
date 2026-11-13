@@ -77,6 +77,8 @@ void World::ResetWithStartWeapon(int startWeaponIndex) {
     startWeaponIndex_ = startWeaponIndex;
     weapons_.clear();
     const WeaponKind start = StartWeaponChoices[startWeaponIndex_];
+    ownedWeapons_ = { WeaponKind::RapidGun, start };
+    energyCap_ = Config::StartEnergy;
     weapons_.push_back(CreateWeapon(start, 0.0f));
     int energyLeft = Config::StartEnergy - WeaponEnergy(start);
     int rapidCount = 0;
@@ -100,6 +102,32 @@ void World::ResetWithStartWeapon(int startWeaponIndex) {
     spawnTimer_ = 0.0f;
     gameOver_ = false;
     gameOverSeconds_ = 0.0f;
+}
+
+int World::UsedEnergy() const {
+    int used = 0;
+    for (const auto& w : weapons_) {
+        used += WeaponEnergy(w->Kind());
+    }
+    return used;
+}
+
+bool World::CanEquip(WeaponKind kind) const {
+    return UsedEnergy() + WeaponEnergy(kind) <= energyCap_;
+}
+
+void World::Equip(WeaponKind kind) {
+    if (!CanEquip(kind)) {
+        return;
+    }
+    // 撃つタイミングがほかの武装と重ならないように、最初に撃つまでの時間を少しずらす
+    weapons_.push_back(CreateWeapon(kind, RandomRange(0.0f, 0.3f)));
+}
+
+void World::Unequip(size_t index) {
+    if (index < weapons_.size()) {
+        weapons_.erase(weapons_.begin() + static_cast<std::ptrdiff_t>(index));
+    }
 }
 
 float World::RandomRange(float min, float max) {

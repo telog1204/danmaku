@@ -65,7 +65,7 @@ namespace {
         DrawBox(barX, barY, barX + barW, barY + barH, GetColor(40, 40, 60), TRUE);
         DrawBox(barX, barY, barX + barW * core.hp / core.maxHp, barY + barH, GetColor(80, 220, 255), TRUE);
         DrawFormatString(barX, barY + 14, GetColor(255, 255, 255), "HP %d / %d", core.hp, core.maxHp);
-        DrawFormatString(Config::ScreenWidth - 140, barY, GetColor(255, 255, 255), "TIME %6.1f", world.ElapsedSeconds());
+        DrawFormatString(540, barY, GetColor(255, 255, 255), "TIME %6.1f", world.ElapsedSeconds());
 
         // 積んでいる武装（同じものはまとめて数を出す）
         int y = Config::ScreenHeight - 22;

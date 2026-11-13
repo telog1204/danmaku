@@ -132,6 +132,14 @@ public:
     const std::vector<Explosion>& Explosions() const { return explosions_; }
     const std::vector<std::unique_ptr<Weapon>>& Weapons() const { return weapons_; }
 
+    // 組み込み画面から使うもの
+    const std::vector<WeaponKind>& OwnedWeapons() const { return ownedWeapons_; }
+    int EnergyCap() const { return energyCap_; }
+    int UsedEnergy() const;
+    bool CanEquip(WeaponKind kind) const;  // エネルギーが足りるか
+    void Equip(WeaponKind kind);           // 1つ積む（足りなければ何もしない）
+    void Unequip(size_t index);            // 積んでいる武装の index 番目を外す
+
     // 武装や敵の動きから使うもの
     std::mt19937& Rng() { return rng_; }
     float RandomRange(float min, float max);
@@ -166,7 +174,9 @@ private:
     void RemoveDead();
 
     Core core_;
-    std::vector<std::unique_ptr<Weapon>> weapons_;
+    std::vector<std::unique_ptr<Weapon>> weapons_;  // 積んでいる武装
+    std::vector<WeaponKind> ownedWeapons_;          // 持っている武装（種類ごとに1つ）
+    int energyCap_ = 0;
     int startWeaponIndex_ = 0;
     std::vector<Enemy> enemies_;
     std::vector<Bullet> playerBullets_;
