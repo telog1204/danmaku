@@ -8,14 +8,14 @@ plugins {
 def dxlibAndroidDir = (findProperty('dxlibAndroidDir') ?: System.getenv('DXLIB_ANDROID_DIR') ?: "${rootDir}/DxLib_Android").toString().replace('\\', '/')
 
 android {
-    namespace = 'com.telog1204.claudedxlibtemplate'
+    namespace = 'com.telog1204.danmaku'
     compileSdk = 37
 
     // DxLib Android版 3.25a のライブラリは NDK r27 系のコンパイラ（clang 18.0.1, r522817）で作られているので、同じ r27 系に固定する
     ndkVersion = '27.3.13750724'
 
     defaultConfig {
-        applicationId = 'com.telog1204.claudedxlibtemplate'
+        applicationId = 'com.telog1204.danmaku'
         minSdk = 26
         targetSdk = 37
         versionCode = 1

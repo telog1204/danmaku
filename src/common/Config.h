@@ -3,7 +3,7 @@
 // ゲーム全体の設定値。ゲームの調整に使う値はこのファイルにまとめる。
 namespace Config {
     // ウィンドウのタイトル（Windows版）。Android版のアプリ名は android/app/src/main/res/values/strings.xml
-    constexpr const char* WindowTitle = "Game";
+    constexpr const char* WindowTitle = "弾幕";
 
     // ゲームの画面の大きさ。Windows版はこの大きさのウィンドウ、Android版はこれを端末の画面に拡大して表示する
     constexpr int ScreenWidth = 800;
