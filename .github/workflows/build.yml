@@ -1,0 +1,131 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+env:
+  DXLIB_VERSION: 3_25a
+  DXLIB_URL: https://dxlib.xsrv.jp/DxLib/DxLib_VC3_25a.zip
+
+jobs:
+  build:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, Win32]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: windows フォルダのソリューションとプロジェクトを探す（プロジェクト名はファイル名から決める）
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $sln = @(Get-ChildItem windows -Filter *.sln -File)
+          $proj = @(Get-ChildItem windows -Filter *.vcxproj -File)
+          if ($sln.Count -ne 1 -or $proj.Count -ne 1) { throw "windows フォルダには .sln と .vcxproj を1つずつ置いてください（.sln: $($sln.Count) 個、.vcxproj: $($proj.Count) 個）" }
+          $name = $proj[0].BaseName
+          Write-Host "ソリューション: $($sln[0].Name)、プロジェクト: $($proj[0].Name)、プロジェクト名: $name"
+          "SLN_PATH=windows\$($sln[0].Name)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PROJ_PATH=windows\$($proj[0].Name)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PROJECT_NAME=$name" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: DXライブラリのキャッシュ
+        id: dxcache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\dxlib-zip
+          key: dxlib-vc-${{ env.DXLIB_VERSION }}
+
+      - name: DXライブラリをダウンロード（キャッシュが無いときだけ）
+        if: steps.dxcache.outputs.cache-hit != 'true'
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\dxlib-zip" | Out-Null
+          Invoke-WebRequest -Uri $env:DXLIB_URL -OutFile "$env:RUNNER_TEMP\dxlib-zip\DxLib_VC$env:DXLIB_VERSION.zip" -MaximumRetryCount 4 -RetryIntervalSec 5
+
+      - name: 7-Zipで展開し、フォルダ一覧をログに出す
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $out = "$env:RUNNER_TEMP\dxlib"
+          7z x "$env:RUNNER_TEMP\dxlib-zip\DxLib_VC$env:DXLIB_VERSION.zip" "-o$out" -y -mcp=932 | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zipの展開に失敗しました（終了コード $LASTEXITCODE）" }
+          Write-Host "=== 展開後のフォルダ一覧（文字化けしていないか確認） ==="
+          Get-ChildItem $out -Recurse -Directory | ForEach-Object { $_.FullName.Substring($out.Length) }
+
+      - name: vcxprojのRelease設定と同じパスにDXライブラリを配置
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          [xml]$proj = Get-Content $env:PROJ_PATH -Raw -Encoding UTF8
+          $cond = "'`$(Configuration)|`$(Platform)'=='Release|${{ matrix.platform }}'"
+          $g = $proj.Project.ItemDefinitionGroup | Where-Object { $_.Condition -eq $cond }
+          if (-not $g) { throw "vcxprojに $cond の設定がありません" }
+          $dirs = @($g.ClCompile.AdditionalIncludeDirectories, $g.Link.AdditionalLibraryDirectories) -split ';' |
+                  Where-Object { $_ -and $_ -notmatch '^%\(' -and $_ -notmatch '\$\(' } | Sort-Object -Unique   # DxLib以外（$(ProjectDir) からの相対指定など）は除く
+          if (-not $dirs) { throw "DXライブラリのディレクトリ指定が見つかりません" }
+          foreach ($dir in $dirs) {
+            Write-Host "配置先: $dir"
+            $drive = Split-Path -Qualifier $dir
+            if (-not (Test-Path "$drive\")) {
+              $root = "$env:RUNNER_TEMP\drive_$($drive.TrimEnd(':'))"
+              New-Item -ItemType Directory -Force $root | Out-Null
+              subst $drive $root
+              if ($LASTEXITCODE -ne 0) { throw "subst $drive に失敗しました" }
+              Write-Host "$drive が無いため $root を $drive に割り当てました"
+            }
+            $leaf = Split-Path -Leaf $dir
+            $src = Get-ChildItem "$env:RUNNER_TEMP\dxlib" -Recurse -Directory | Where-Object Name -eq $leaf | Select-Object -First 1
+            if (-not $src) { throw "パッケージ内に「$leaf」フォルダがありません" }
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Copy-Item "$($src.FullName)\*" $dir -Recurse -Force
+            if (-not (Test-Path (Join-Path $dir 'DxLib.h'))) { throw "$dir に DxLib.h がありません" }
+          }
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: MSBuildでReleaseビルド（${{ matrix.platform }}）
+        env:
+          CL: /wd4828   # DxLib.h（Shift_JIS）を /utf-8 で読む際の警告をCIでのみ抑止
+        run: |
+          $slnPlatform = if ('${{ matrix.platform }}' -eq 'Win32') { 'x86' } else { 'x64' }
+          msbuild $env:SLN_PATH /m /p:Configuration=Release /p:Platform=$slnPlatform
+          if ($LASTEXITCODE -ne 0) { throw "ビルドに失敗しました" }
+
+      - name: 成果物フォルダを作成（exe・素材・DXライブラリの規約文書）
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $exe = if ('${{ matrix.platform }}' -eq 'x64') { "windows\x64\Release\$env:PROJECT_NAME.exe" } else { "windows\Release\$env:PROJECT_NAME.exe" }
+          if (-not (Test-Path $exe)) { throw "$exe がありません" }
+          $pkg = "$env:RUNNER_TEMP\package\$env:PROJECT_NAME"
+          New-Item -ItemType Directory -Force $pkg | Out-Null
+          Copy-Item $exe $pkg
+          # 素材は assets フォルダの中身を、実行ファイルと同じ場所にそのまま置く（.gitkeep などの隠しファイルは除く）
+          Get-ChildItem assets -Force | Where-Object { $_.Name -notlike '.*' } | Copy-Item -Destination $pkg -Recurse
+          $base = "$env:RUNNER_TEMP\dxlib"
+          $docs = Get-ChildItem $base -Recurse -File |
+                  Where-Object { $_.Extension -in '.txt','.md','.pdf','.html','.htm' -and
+                                 $_.Name -match 'ライセンス|License|著作権|規約|使用条件' }
+          if ($docs) {
+            Write-Host "=== 同梱するDXライブラリの著作権・使用規約関係の文書 ==="
+            foreach ($d in $docs) {
+              $rel = $d.FullName.Substring($base.Length + 1)
+              $dest = Join-Path "$pkg\DxLib_License" $rel
+              New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+              Copy-Item $d.FullName $dest
+              Write-Host $rel
+            }
+          } else {
+            Write-Host "::warning::DXライブラリのパッケージに著作権・使用規約の文書が見つかりませんでした"
+          }
+          Write-Host "=== 成果物の中身 ==="
+          Get-ChildItem $pkg -Recurse | ForEach-Object { $_.FullName.Substring($pkg.Length) }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-${{ github.sha }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}\package
+          retention-days: 7
+          if-no-files-found: error

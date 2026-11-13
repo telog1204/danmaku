@@ -1,0 +1,66 @@
+plugins {
+    id 'com.android.application'
+}
+
+// DxLib Android版（DxLib_Android3_25a.zip を展開した DxLib_Android フォルダ）の場所。
+// リポジトリには含めない。GitHub Actions はビルドのたびにダウンロードして android/DxLib_Android に置く。
+// 手元でビルドするときも同じ場所に置くか、gradle.properties（-PdxlibAndroidDir=…）か環境変数 DXLIB_ANDROID_DIR で指定する
+def dxlibAndroidDir = (findProperty('dxlibAndroidDir') ?: System.getenv('DXLIB_ANDROID_DIR') ?: "${rootDir}/DxLib_Android").toString().replace('\\', '/')
+
+android {
+    namespace = 'com.telog1204.claudedxlibtemplate'
+    compileSdk = 37
+
+    // DxLib Android版 3.25a のライブラリは NDK r27 系のコンパイラ（clang 18.0.1, r522817）で作られているので、同じ r27 系に固定する
+    ndkVersion = '27.3.13750724'
+
+    defaultConfig {
+        applicationId = 'com.telog1204.claudedxlibtemplate'
+        minSdk = 26
+        targetSdk = 37
+        versionCode = 1
+        versionName = '0.1'
+
+        ndk {
+            // スマホでのテストプレイ用なので、今のスマホのほぼすべてが使う arm64-v8a だけをビルドする
+            abiFilters 'arm64-v8a'
+        }
+        externalNativeBuild {
+            cmake {
+                // NDK r27 で 16KB ページサイズの端末にも対応させる
+                arguments "-DDXLIB_ANDROID_DIR=${dxlibAndroidDir}", '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+            }
+        }
+    }
+
+    // ===== 署名 =====
+    // この鍵はテストプレイ専用のデバッグ鍵であり、公開されても問題ない前提でリポジトリに含めている。
+    // ストア公開などの本番用途には絶対に使わず、公開時は別の鍵を作成してGitHub Secretsで管理すること。
+    // （毎回同じ鍵で署名するので、スマホに上書きインストールできる。詳しくは android/keystore/README.md）
+    signingConfigs {
+        debug {
+            storeFile = file('../keystore/gametest.jks')
+            storePassword = 'gametest'
+            keyAlias = 'gametest'
+            keyPassword = 'gametest'
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig = signingConfigs.debug
+        }
+    }
+
+    // 画像・音声などの素材は、Windows版と同じリポジトリ直下の assets フォルダをそのまま apk に入れる（コピーしない）
+    sourceSets {
+        main {
+            assets.srcDirs = ['../../assets']
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file('CMakeLists.txt')
+            version = '3.31.5'
+        }
+    }
+}

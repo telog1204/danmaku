@@ -1,0 +1,65 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+
+# 環境変数（秘密情報）
+.env
+.env.*
+!.env.example
+
+# ログ
+*.log
+
+# Claude Codeの個人用設定
+.claude/settings.local.json
+
+# Visual Studio（C++/DxLib）
+.vs/
+Debug/
+Release/
+x64/
+x86/
+ARM64/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.ipch
+*.pch
+*.tlog
+*.lastbuildstate
+*.iobj
+*.ipdb
+*.exp
+*.lib
+*.exe
+*.user
+*.aps
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+# DxLib本体（各自でインストール）
+DxLib/
+
+# Android（Gradle・CMake）
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+
+# 署名鍵は原則コミットしない（本番用の鍵の誤コミット防止）。
+# ただしテストプレイ専用のデバッグ鍵だけは例外として含める（android/keystore/README.md を参照）
+*.jks
+*.keystore
+!android/keystore/gametest.jks
+
+# DxLib Android版（ビルド時にダウンロードして置く）
+android/DxLib_Android/

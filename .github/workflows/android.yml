@@ -1,0 +1,109 @@
+name: Android
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+env:
+  # DxLib Android版はバージョンを固定し、リポジトリには含めずビルドのたびにダウンロードする
+  DXLIB_VERSION: 3_25a
+  DXLIB_URL: https://dxlib.xsrv.jp/DxLib/DxLib_Android3_25a.zip
+  # Gradle は DxLib Android版に付属するサンプルと同じバージョンにする（android/gradle/wrapper/gradle-wrapper.properties と同じ）
+  GRADLE_VERSION: 9.5.0
+
+# apk を GitHub Releases の android-latest（プレリリース）に上書きで置くため、書き込み権限が必要
+permissions:
+  contents: write
+
+# 同時に2つのビルドが android-latest を書き換えないよう、1つずつ順に実行する
+concurrency:
+  group: android-latest
+  cancel-in-progress: false
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    env:
+      LANG: C.UTF-8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: DXライブラリAndroid版のキャッシュ
+        id: dxcache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/dxlib-android-zip
+          key: dxlib-android-${{ env.DXLIB_VERSION }}
+
+      - name: DXライブラリAndroid版をダウンロード（キャッシュが無いときだけ）
+        if: steps.dxcache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/dxlib-android-zip"
+          curl -fSL --retry 4 -o "$RUNNER_TEMP/dxlib-android-zip/DxLib_Android$DXLIB_VERSION.zip" "$DXLIB_URL"
+
+      - name: 7-Zipで android/DxLib_Android に展開する
+        run: |
+          7z x "$RUNNER_TEMP/dxlib-android-zip/DxLib_Android$DXLIB_VERSION.zip" -oandroid -y -mcp=932 > /dev/null
+          echo "=== 使うライブラリとヘッダー（arm64-v8a） ==="
+          ls -l android/DxLib_Android/Lib_AndroidStudio/arm64-v8a
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: apk をビルド（デバッグ版・リポジトリのテスト用の鍵で署名）
+        run: gradle -p android assembleDebug --stacktrace
+
+      - name: 署名と中身を確認
+        run: |
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          ls -l "$apk"
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$apksigner" verify --print-certs "$apk" | grep -E "Signer|SHA-256"
+          echo "=== apk の中の素材とライブラリ ==="
+          unzip -l "$apk" | grep -E "assets/|lib/"
+          echo "=== libgame.so：起動に使う関数が公開されているか、16KBページサイズに対応しているか ==="
+          readelf="$ANDROID_HOME/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          unzip -o -q "$apk" lib/arm64-v8a/libgame.so -d "$RUNNER_TEMP/so"
+          so="$RUNNER_TEMP/so/lib/arm64-v8a/libgame.so"
+          "$readelf" --dyn-syms "$so" | grep -E " ANativeActivity_onCreate$" || { echo "::error::ANativeActivity_onCreate が libgame.so から公開されていません"; exit 1; }
+          "$readelf" -lW "$so" | grep LOAD
+          "$readelf" -lW "$so" | awk '$1=="LOAD" && $NF!="0x4000" && $NF!="0x10000" {bad=1} END {exit bad}' || echo "::warning::libgame.so のLOADが16KBに揃っていません"
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$apk" "$RUNNER_TEMP/out/game-debug.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: game-android-${{ github.sha }}
+          path: ${{ runner.temp }}/out/game-debug.apk
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: GitHub Releases の android-latest（プレリリース）に apk を上書きで置く
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=android-latest
+          notes="テストプレイ用のデバッグ版（arm64-v8a）。ビルドのたびに上書きされます。
+
+          - ブランチ: ${GITHUB_REF_NAME}
+          - コミット: ${GITHUB_SHA}
+          - ビルド: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          署名はリポジトリのテスト用の鍵（android/keystore/gametest.jks）なので、前の版の上から上書きインストールできます。"
+          # タグを今回のコミットに付け直す（タグの push ではワークフローは動かない）
+          git tag -f "$tag" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$tag"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --prerelease --title "Android テスト版（最新）" --notes "$notes"
+          else
+            gh release create "$tag" --prerelease --title "Android テスト版（最新）" --notes "$notes" --verify-tag
+          fi
+          gh release upload "$tag" "$RUNNER_TEMP/out/game-debug.apk" --clobber
+          gh release view "$tag" --json url,isPrerelease,assets --jq '{url, isPrerelease, assets: [.assets[] | {name, size, updatedAt}]}'

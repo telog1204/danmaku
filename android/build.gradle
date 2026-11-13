@@ -1,0 +1,4 @@
+// Android Gradle Plugin のバージョンは、DxLib Android版 3.25a に付属するサンプル（AGP 9.3.1・Gradle 9.5.0）に合わせている
+plugins {
+    id 'com.android.application' version '9.3.1' apply false
+}
