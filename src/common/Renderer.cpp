@@ -50,7 +50,7 @@ namespace {
         // HPが減っていたら、残りを細い線で出す
         if (e.hp < e.maxHp) {
             const int w = r * 2;
-            const int filled = w * std::max(0, e.hp) / e.maxHp;
+            const int filled = static_cast<int>(w * std::max(0.0f, e.hp) / e.maxHp);
             DrawBox(x - r, y - r - 7, x - r + filled, y - r - 5, GetColor(120, 255, 120), TRUE);
         }
     }
@@ -66,6 +66,54 @@ namespace {
         DrawBox(barX, barY, barX + barW * core.hp / core.maxHp, barY + barH, GetColor(80, 220, 255), TRUE);
         DrawFormatString(barX, barY + 14, GetColor(255, 255, 255), "HP %d / %d", core.hp, core.maxHp);
         DrawFormatString(Config::ScreenWidth - 140, barY, GetColor(255, 255, 255), "TIME %6.1f", world.ElapsedSeconds());
+
+        // 積んでいる武装（同じものはまとめて数を出す）
+        int y = Config::ScreenHeight - 22;
+        const auto& weapons = world.Weapons();
+        for (size_t i = 0; i < weapons.size();) {
+            const WeaponKind kind = weapons[i]->Kind();
+            size_t n = 0;
+            while (i < weapons.size() && weapons[i]->Kind() == kind) {
+                ++n;
+                ++i;
+            }
+            if (n > 1) {
+                DrawFormatString(10, y, GetColor(200, 230, 255), "%s ×%d", WeaponName(kind), static_cast<int>(n));
+            } else {
+                DrawFormatString(10, y, GetColor(200, 230, 255), "%s", WeaponName(kind));
+            }
+            y -= 20;
+        }
+        const char* hint = "右クリック（2本指タップ）：開始武装を切り替え";
+        const int hintW = GetDrawStringWidth(hint, static_cast<int>(std::strlen(hint)));
+        DrawString(Config::ScreenWidth - 10 - hintW, Config::ScreenHeight - 22, hint, GetColor(140, 140, 160));
+    }
+
+    void DrawBeam(const Beam& b) {
+        const Vec2 tail = b.Tail();
+        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(30, 60, 90), 7);
+        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(150, 220, 255), 3);
+        DrawCircle(Px(b.pos.x), Px(b.pos.y), 3, GetColor(255, 255, 255), TRUE);
+    }
+
+    void DrawMissile(const Missile& m) {
+        // 進む向きを指す細長い三角
+        const Vec2 f = Vec2::FromAngle(m.heading);
+        const Vec2 s = f.Perpendicular();
+        const Vec2 tip = m.pos + f * 7.0f;
+        const Vec2 left = m.pos - f * 5.0f + s * 3.0f;
+        const Vec2 right = m.pos - f * 5.0f - s * 3.0f;
+        const Vec2 flame = m.pos - f * 9.0f;
+        DrawCircle(Px(flame.x), Px(flame.y), 3, GetColor(90, 50, 10), TRUE);
+        DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 230, 90), TRUE);
+    }
+
+    void DrawExplosion(const Explosion& x) {
+        // 残り時間が少ないほど暗くする
+        const float k = x.maxLife > 0.0f ? std::max(0.0f, x.life / x.maxLife) : 0.0f;
+        const int bright = static_cast<int>(60 + 140 * k);
+        DrawCircle(Px(x.pos.x), Px(x.pos.y), Px(x.radius), GetColor(bright, bright * 2 / 5, bright / 8), TRUE);
+        DrawCircle(Px(x.pos.x), Px(x.pos.y), Px(x.radius * 0.5f), GetColor(bright, bright * 3 / 5, bright / 4), TRUE);
     }
 
     void DrawCentered(int y, unsigned int color, const char* text) {
@@ -95,8 +143,24 @@ void DrawWorld(const World& world) {
     for (const Enemy& e : world.Enemies()) {
         DrawEnemy(e);
     }
+    for (const Explosion& x : world.Explosions()) {
+        DrawExplosion(x);
+    }
     for (const Bullet& b : world.PlayerBullets()) {
-        DrawGlowCircle(b.pos, b.radius, 120, 255, 230);
+        if (b.life >= 0.0f) {
+            DrawGlowCircle(b.pos, b.radius, 255, 170, 60);  // 炸裂弾の破片
+        } else {
+            DrawGlowCircle(b.pos, b.radius, 120, 255, 230);
+        }
+    }
+    for (const Beam& b : world.Beams()) {
+        DrawBeam(b);
+    }
+    for (const Missile& m : world.Missiles()) {
+        DrawMissile(m);
+    }
+    for (const Shell& s : world.Shells()) {
+        DrawGlowCircle(s.pos, Config::ShellRadius, 255, 140, 40);
     }
     for (const Bullet& b : world.EnemyBullets()) {
         DrawGlowCircle(b.pos, b.radius, 255, 90, 160);

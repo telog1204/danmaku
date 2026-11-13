@@ -31,54 +31,151 @@ namespace {
         }
         return targetPos + targetVel * t;
     }
-}
 
-void RapidGun::Reset() {
-    cooldown_ = 0.0f;
-}
+    // 撃つ間隔を数える部分は、どの武装も同じ
+    class TimedWeapon : public Weapon {
+    public:
+        TimedWeapon(float interval, float firstDelay) : interval_(interval), cooldown_(firstDelay) {}
 
-void RapidGun::Update(World& world, float dt) {
-    cooldown_ -= dt;
-    if (cooldown_ > 0.0f) {
-        return;
-    }
-
-    const Vec2 origin = world.GetCore().pos;
-
-    // 敵本体を優先して、最も近いものを狙う（相手の動きを先読みして、当たる位置へ撃つ）
-    const Vec2* target = nullptr;
-    const Vec2* targetVel = nullptr;
-    float bestDistSq = 0.0f;
-    for (const Enemy& e : world.Enemies()) {
-        const float d = (e.pos - origin).LengthSq();
-        if (target == nullptr || d < bestDistSq) {
-            target = &e.pos;
-            targetVel = &e.vel;
-            bestDistSq = d;
-        }
-    }
-    // 敵本体がいないときだけ、最も近い敵の弾を狙う
-    if (target == nullptr) {
-        for (const Bullet& b : world.EnemyBullets()) {
-            const float d = (b.pos - origin).LengthSq();
-            if (target == nullptr || d < bestDistSq) {
-                target = &b.pos;
-                targetVel = &b.vel;
-                bestDistSq = d;
+        void Update(World& world, float dt) override {
+            cooldown_ -= dt;
+            if (cooldown_ > 0.0f) {
+                return;
+            }
+            if (Fire(world)) {
+                cooldown_ += interval_;
+            } else {
+                cooldown_ = 0.0f;  // 狙うものが現れたらすぐ撃てるようにしておく
             }
         }
-    }
-    if (target == nullptr) {
-        cooldown_ = 0.0f;  // 狙うものが現れたらすぐ撃てるようにしておく
-        return;
-    }
 
-    const Vec2 aimPos = LeadTarget(origin, *target, *targetVel, Config::RapidGunBulletSpeed);
-    const Vec2 toTarget = aimPos - origin;
-    const float spread = Config::RapidGunSpreadDegrees * Pi / 180.0f;
-    const float angle = std::atan2(toTarget.y, toTarget.x) + world.RandomRange(-spread, spread);
-    const Vec2 dir = Vec2::FromAngle(angle);
-    world.FirePlayerBullet(origin + dir * Config::CoreRadius, dir * Config::RapidGunBulletSpeed,
-                           Config::PlayerBulletRadius, Config::RapidGunDamage);
-    cooldown_ += Config::RapidGunInterval;
+    protected:
+        // 撃てたら true を返す（狙うものがいなければ false）
+        virtual bool Fire(World& world) = 0;
+
+    private:
+        float interval_;
+        float cooldown_;
+    };
+
+    // 速射砲（基本型）。最も近い敵を先読みして狙い、ほんの少しばらけた弾を撃つ
+    class RapidGun : public TimedWeapon {
+    public:
+        explicit RapidGun(float firstDelay) : TimedWeapon(Config::RapidGunInterval, firstDelay) {}
+        WeaponKind Kind() const override { return WeaponKind::RapidGun; }
+
+    protected:
+        bool Fire(World& world) override {
+            const Vec2 origin = world.GetCore().pos;
+            const Target target = world.FindNearestTarget(origin);
+            if (target.kind == TargetKind::None) {
+                return false;
+            }
+            const Vec2 toTarget = LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin;
+            const float spread = Config::RapidGunSpreadDegrees * Pi / 180.0f;
+            const float angle = std::atan2(toTarget.y, toTarget.x) + world.RandomRange(-spread, spread);
+            const Vec2 dir = Vec2::FromAngle(angle);
+            world.FirePlayerBullet(origin + dir * Config::CoreRadius, dir * Config::RapidGunBulletSpeed,
+                                   Config::PlayerBulletRadius, Config::RapidGunDamage);
+            return true;
+        }
+    };
+
+    // ビーム砲（基本型）。最も近い敵を先読みして狙い、敵を貫くビームを撃つ
+    class BeamGun : public TimedWeapon {
+    public:
+        explicit BeamGun(float firstDelay) : TimedWeapon(Config::BeamInterval, firstDelay) {}
+        WeaponKind Kind() const override { return WeaponKind::Beam; }
+
+    protected:
+        bool Fire(World& world) override {
+            const Vec2 origin = world.GetCore().pos;
+            const Target target = world.FindNearestTarget(origin);
+            if (target.kind == TargetKind::None) {
+                return false;
+            }
+            const Vec2 dir = (LeadTarget(origin, target.pos, target.vel, Config::BeamSpeed) - origin).Normalized();
+            world.FireBeam(origin + dir * Config::CoreRadius, dir * Config::BeamSpeed, Config::BeamDamage);
+            return true;
+        }
+    };
+
+    // 誘導兵器（基本型）。最も近い敵の方向へ撃ち出し、追いかけさせる
+    class MissileLauncher : public TimedWeapon {
+    public:
+        explicit MissileLauncher(float firstDelay) : TimedWeapon(Config::MissileInterval, firstDelay) {}
+        WeaponKind Kind() const override { return WeaponKind::Missile; }
+
+    protected:
+        bool Fire(World& world) override {
+            const Vec2 origin = world.GetCore().pos;
+            const Target target = world.FindNearestTarget(origin);
+            if (target.kind == TargetKind::None) {
+                return false;
+            }
+            const Vec2 toTarget = target.pos - origin;
+            const float heading = std::atan2(toTarget.y, toTarget.x);
+            world.FireMissile(origin + Vec2::FromAngle(heading) * Config::CoreRadius, heading, target);
+            return true;
+        }
+    };
+
+    // 炸裂弾（基本型）。敵が多い場所の、中心の少し手前で炸裂させる
+    class ShellCannon : public TimedWeapon {
+    public:
+        explicit ShellCannon(float firstDelay) : TimedWeapon(Config::ShellInterval, firstDelay) {}
+        WeaponKind Kind() const override { return WeaponKind::Shell; }
+
+    protected:
+        bool Fire(World& world) override {
+            const Vec2 origin = world.GetCore().pos;
+            Vec2 center;
+            if (!world.FindCrowdCenter(center)) {
+                // 敵本体がいなければ、最も近い敵の弾のところで炸裂させる
+                const Target target = world.FindNearestTarget(origin);
+                if (target.kind == TargetKind::None) {
+                    return false;
+                }
+                center = target.pos;
+            }
+            const Vec2 toCenter = center - origin;
+            const Vec2 dir = toCenter.Normalized();
+            if (dir.LengthSq() <= 0.0f) {
+                return false;
+            }
+            const float distance = std::max(Config::CoreRadius + 10.0f, toCenter.Length() - Config::ShellShortDistance);
+            world.FireShell(origin + dir * Config::CoreRadius, dir * Config::ShellSpeed, distance - Config::CoreRadius);
+            return true;
+        }
+    };
+}
+
+const char* WeaponName(WeaponKind kind) {
+    switch (kind) {
+    case WeaponKind::RapidGun: return "速射砲 基本型";
+    case WeaponKind::Beam: return "ビーム砲 基本型";
+    case WeaponKind::Missile: return "誘導兵器 基本型";
+    case WeaponKind::Shell: return "炸裂弾 基本型";
+    }
+    return "";
+}
+
+int WeaponEnergy(WeaponKind kind) {
+    switch (kind) {
+    case WeaponKind::RapidGun: return Config::RapidGunEnergy;
+    case WeaponKind::Beam: return Config::BeamEnergy;
+    case WeaponKind::Missile: return Config::MissileEnergy;
+    case WeaponKind::Shell: return Config::ShellEnergy;
+    }
+    return 0;
+}
+
+std::unique_ptr<Weapon> CreateWeapon(WeaponKind kind, float firstDelay) {
+    switch (kind) {
+    case WeaponKind::RapidGun: return std::make_unique<RapidGun>(firstDelay);
+    case WeaponKind::Beam: return std::make_unique<BeamGun>(firstDelay);
+    case WeaponKind::Missile: return std::make_unique<MissileLauncher>(firstDelay);
+    case WeaponKind::Shell: return std::make_unique<ShellCannon>(firstDelay);
+    }
+    return nullptr;
 }
