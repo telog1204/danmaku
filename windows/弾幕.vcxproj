@@ -158,6 +158,7 @@
     <ClCompile Include="..\src\common\Weapon.cpp" />
     <ClCompile Include="..\src\common\EnemyAI.cpp" />
     <ClCompile Include="..\src\common\Renderer.cpp" />
+    <ClCompile Include="..\src\common\BuildScreen.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\common\pch.h" />
@@ -170,6 +171,7 @@
     <ClInclude Include="..\src\common\Weapon.h" />
     <ClInclude Include="..\src\common\EnemyAI.h" />
     <ClInclude Include="..\src\common\Renderer.h" />
+    <ClInclude Include="..\src\common\BuildScreen.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
