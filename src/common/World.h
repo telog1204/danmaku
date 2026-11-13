@@ -35,11 +35,13 @@ struct Enemy {
     int hp = 0;
     int maxHp = 0;
     bool alive = true;
-    bool entered = false;      // 一度画面の中に入ったか（回避型は入ったあと画面の外へ出ないようにする）
+    float heading = 0.0f;      // 機首の向き（ラジアン）。常にこの向きへ進む
+    float speed = 0.0f;        // 今の速さ（ドット/秒）
+    bool entered = false;      // 一度画面の中に入ったか（入ったあとは、画面の端で旋回して内側へ戻る）
     float shotTimer = 0.0f;    // 次に撃つまでの時間（秒）
-    float orbitDir = 1.0f;     // コアの周りを回り込む向き（1：左回り、−1：右回り）
+    float orbitDir = 1.0f;     // コアの周りを回る向き（1：左回り、−1：右回り）
     float reactionTimer = 0.0f; // 回避型：次に弾を見直すまでの時間（秒）
-    Vec2 dodgeVel;             // 回避型：今避けている速さ
+    Vec2 dodgeDir;             // 回避型：当たりそうな弾から離れたい向き（当たりそうな弾がなければ長さ0）
 };
 
 // ゲームの中身（コア・敵・弾）をまとめて持ち、時間を進める

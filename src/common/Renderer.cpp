@@ -25,8 +25,8 @@ namespace {
         const int r = Px(e.radius);
         switch (e.type) {
         case EnemyType::Charger: {
-            // 進む向きを指す三角
-            const Vec2 f = e.vel.LengthSq() > 0.0f ? e.vel.Normalized() : Vec2(1.0f, 0.0f);
+            // 機首の向きを指す三角
+            const Vec2 f = Vec2::FromAngle(e.heading);
             const Vec2 s = f.Perpendicular();
             const Vec2 tip = e.pos + f * e.radius * 1.3f;
             const Vec2 left = e.pos - f * e.radius + s * e.radius;

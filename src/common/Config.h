@@ -43,28 +43,35 @@ namespace Config {
     constexpr float EnemyBulletRadius = 4.0f;
     constexpr int EnemyBulletDamage = 5;
 
-    // 突撃型：コアへまっすぐ近づき、体当たりする
+    // 敵の動き（航空機のような動き）。常に機首の向きへ進み、向きと速さは少しずつしか変えられない
+    constexpr float EnemyAcceleration = 80.0f;    // 速さを変えられる量（ドット/秒を1秒あたり）
+    constexpr float EnemyEdgeMargin = 60.0f;      // 画面の端からこの距離に入ったら、旋回して内側へ戻る
+
+    // 突撃型：コアへ機首を向けて突っ込み、体当たりする
     constexpr int ChargerHp = 3;
     constexpr float ChargerSpeed = 80.0f;
+    constexpr float ChargerTurnDegrees = 90.0f;   // 1秒間に曲がれる角度（度）
     constexpr float ChargerRadius = 12.0f;
     constexpr int ChargerRamDamage = 10;
 
-    // 射撃型：コアから一定の距離を保ちながら回り込み、弾を撃つ
+    // 射撃型：コアの周りを旋回しながら、弾を撃つ
     constexpr int ShooterHp = 4;
     constexpr float ShooterSpeed = 60.0f;
+    constexpr float ShooterTurnDegrees = 60.0f;
     constexpr float ShooterRadius = 12.0f;
     constexpr float ShooterKeepDistance = 220.0f;
     constexpr float ShooterShotInterval = 1.5f;
 
-    // 回避型：遠めの距離を保って撃ちながら、飛んでくる弾の進路を先読みして避ける
+    // 回避型：遠めの距離で旋回して撃ちながら、飛んでくる弾の進路を先読みし、旋回してかわす
     constexpr int EvaderHp = 3;
     constexpr float EvaderSpeed = 90.0f;
+    constexpr float EvaderDodgeSpeed = 130.0f;    // 避けるときに加速する速さの上限
+    constexpr float EvaderTurnDegrees = 120.0f;
     constexpr float EvaderRadius = 11.0f;
     constexpr float EvaderKeepDistance = 260.0f;
     constexpr float EvaderShotInterval = 2.0f;
     constexpr float EvaderLookAheadSeconds = 0.8f;   // 何秒先までの弾の進路を見るか
     constexpr float EvaderDodgeMargin = 20.0f;       // 弾との間にあけたい隙間（ドット）
-    constexpr float EvaderDodgeSpeedRate = 1.2f;     // 避けるときの速さ（ふだんの速さに対する倍率）
     constexpr float EvaderReactionMin = 0.1f;       // 弾を見直す間隔（秒）の最小と最大。この間でばらつく
     constexpr float EvaderReactionMax = 0.35f;
     constexpr float EvaderMissChance = 0.3f;        // 見直したときに、弾を見落とす確率
