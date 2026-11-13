@@ -154,6 +154,10 @@
     <ClCompile Include="..\src\windows\Platform_windows.cpp" />
     <ClCompile Include="..\src\common\GameLoop.cpp" />
     <ClCompile Include="..\src\common\Game.cpp" />
+    <ClCompile Include="..\src\common\World.cpp" />
+    <ClCompile Include="..\src\common\Weapon.cpp" />
+    <ClCompile Include="..\src\common\EnemyAI.cpp" />
+    <ClCompile Include="..\src\common\Renderer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\common\pch.h" />
@@ -161,6 +165,11 @@
     <ClInclude Include="..\src\common\Game.h" />
     <ClInclude Include="..\src\common\Platform.h" />
     <ClInclude Include="..\src\common\GameLoop.h" />
+    <ClInclude Include="..\src\common\Vec2.h" />
+    <ClInclude Include="..\src\common\World.h" />
+    <ClInclude Include="..\src\common\Weapon.h" />
+    <ClInclude Include="..\src\common\EnemyAI.h" />
+    <ClInclude Include="..\src\common\Renderer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
