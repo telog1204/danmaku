@@ -53,4 +53,4 @@ OSによって違う処理は `src/common/Platform.h` の関数にまとめ、OS
 - `Build`（`.github/workflows/build.yml`）：Windows版を Windows ランナーでビルドし、exe と `assets/` の中身を成果物として7日間保存します。
 - `Android`（`.github/workflows/android.yml`）：Android版の apk を Linux ランナーでビルドし、GitHub Releases の [android-latest](../../releases/tag/android-latest)（プレリリース）に上書きで置きます。スマホのブラウザからダウンロードしてインストールできます。
 
-どちらも、どのブランチに push しても動きます。
+どちらも手動で実行します（GitHub の Actions 画面の「Run workflow」から実行するか、Claude Code に依頼します）。
