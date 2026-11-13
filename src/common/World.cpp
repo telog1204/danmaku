@@ -116,17 +116,20 @@ void World::SpawnEnemy() {
     case 0:
         e.type = EnemyType::Charger;
         e.radius = Config::ChargerRadius;
+        e.speed = Config::ChargerSpeed;
         baseHp = Config::ChargerHp;
         break;
     case 1:
         e.type = EnemyType::Shooter;
         e.radius = Config::ShooterRadius;
+        e.speed = Config::ShooterSpeed;
         baseHp = Config::ShooterHp;
         e.shotTimer = RandomRange(0.5f, Config::ShooterShotInterval);
         break;
     default:
         e.type = EnemyType::Evader;
         e.radius = Config::EvaderRadius;
+        e.speed = Config::EvaderSpeed;
         baseHp = Config::EvaderHp;
         e.shotTimer = RandomRange(0.5f, Config::EvaderShotInterval);
         break;
@@ -151,6 +154,10 @@ void World::SpawnEnemy() {
     } else {
         e.pos = Vec2(-m, t - (2.0f * w + h));
     }
+    // 最初はコアの方へ機首を向けて現れる
+    const Vec2 toCore = core_.pos - e.pos;
+    e.heading = std::atan2(toCore.y, toCore.x);
+    e.vel = Vec2::FromAngle(e.heading) * e.speed;
     enemies_.push_back(e);
 }
 
