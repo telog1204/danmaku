@@ -75,6 +75,33 @@ namespace Config {
     // 開始時のエネルギー上限
     constexpr int StartEnergy = 3;
 
+    // 強化パーツの効果（1個あたり）
+    constexpr float PartPowerRate = 0.5f;          // 威力強化：威力が元の値のこの割合ずつ増える（速射砲・ビーム砲・誘導兵器）
+    constexpr float ShellPartPowerRate = 0.3f;     // 威力強化（炸裂弾）：直撃・爆炎・破片の威力
+    constexpr float PartRateMultiplier = 0.8f;     // 連射強化：撃つ間隔がこの倍率ずつ短くなる
+    constexpr float RapidFocusMultiplier = 0.5f;   // 収束：ばらつきがこの倍率ずつ小さくなる
+    constexpr float RapidPierceChancePerPart = 0.25f; // 貫徹力強化（速射砲）：当たったときに貫く確率
+    constexpr float RapidPierceDecay = 0.7f;       // 速射砲の弾が貫いたあとに残る威力の割合
+    constexpr float BeamPierceDecayPerPart = 0.1f; // 貫徹力強化（ビーム砲）：貫いたあとに残る威力の割合が増える量
+    constexpr float BeamDecayMax = 0.95f;
+    constexpr float MissileHomingRate = 0.3f;      // 誘導力強化：曲がる力が増える割合
+    constexpr float MissileBlastRate = 0.3f;       // 爆発範囲拡大：爆発の半径が増える割合
+    constexpr float ShellFlameRadiusRate = 0.25f;  // 爆炎範囲拡大：爆炎の半径が増える割合
+    constexpr float ShellFlameDurationRate = 0.5f; // 爆炎持続延長：爆炎の残る時間が増える割合
+    constexpr int ShellFragmentsPerPart = 5;       // 破片増加：増える破片の数
+
+    // 落とし物
+    constexpr float DropChance = 0.1f;             // 敵を倒したときに、武装か強化パーツを落とす確率
+    constexpr int ExpFirstNeed = 10;               // 最初のエネルギー上限解放パーツが出るまでに必要な経験値
+    constexpr int ExpNeedGrowth = 5;               // 1つ出るたびに、次に必要な経験値が増える量
+    constexpr int EvaderExp = 2;                   // 回避型を倒したときの経験値（ほかの敵は1）
+    constexpr float PickupWaitSeconds = 0.3f;      // 落ちた場所にとどまる時間
+    constexpr float PickupStartSpeed = 200.0f;     // コアへ吸い寄せられ始める速さ
+    constexpr float PickupAcceleration = 600.0f;
+    constexpr float PickupMaxSpeed = 700.0f;
+    constexpr float PickupRadius = 8.0f;
+    constexpr float MessageSeconds = 2.0f;         // 拾ったものを画面の上に表示する時間
+
     // 敵の出現。間隔は時間とともに短くなる（最初の間隔 − 経過秒 × 短くなる速さ。下限あり）
     constexpr float SpawnIntervalStart = 1.5f;
     constexpr float SpawnIntervalMin = 0.4f;

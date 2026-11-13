@@ -32,7 +32,7 @@ namespace {
         return targetPos + targetVel * t;
     }
 
-    // 撃つ間隔を数える部分は、どの武装も同じ
+    // 撃つ間隔を数える部分は、どの武装も同じ。連射強化を付けるほど間隔が短くなる
     class TimedWeapon : public Weapon {
     public:
         TimedWeapon(float interval, float firstDelay) : interval_(interval), cooldown_(firstDelay) {}
@@ -43,7 +43,7 @@ namespace {
                 return;
             }
             if (Fire(world)) {
-                cooldown_ += interval_;
+                cooldown_ += interval_ * std::pow(Config::PartRateMultiplier, static_cast<float>(CountPart(PartKind::Rate)));
             } else {
                 cooldown_ = 0.0f;  // 狙うものが現れたらすぐ撃てるようにしておく
             }
@@ -52,6 +52,11 @@ namespace {
     protected:
         // 撃てたら true を返す（狙うものがいなければ false）
         virtual bool Fire(World& world) = 0;
+
+        // 威力強化を反映した倍率
+        float PowerScale(float ratePerPart) const {
+            return 1.0f + ratePerPart * static_cast<float>(CountPart(PartKind::Power));
+        }
 
     private:
         float interval_;
@@ -72,11 +77,17 @@ namespace {
                 return false;
             }
             const Vec2 toTarget = LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin;
-            const float spread = Config::RapidGunSpreadDegrees * Pi / 180.0f;
+            const float spread = Config::RapidGunSpreadDegrees * Pi / 180.0f *
+                                 std::pow(Config::RapidFocusMultiplier, static_cast<float>(CountPart(PartKind::Focus)));
             const float angle = std::atan2(toTarget.y, toTarget.x) + world.RandomRange(-spread, spread);
             const Vec2 dir = Vec2::FromAngle(angle);
-            world.FirePlayerBullet(origin + dir * Config::CoreRadius, dir * Config::RapidGunBulletSpeed,
-                                   Config::PlayerBulletRadius, Config::RapidGunDamage);
+            Bullet b;
+            b.pos = origin + dir * Config::CoreRadius;
+            b.vel = dir * Config::RapidGunBulletSpeed;
+            b.radius = Config::PlayerBulletRadius;
+            b.damage = Config::RapidGunDamage * PowerScale(Config::PartPowerRate);
+            b.pierceChance = std::min(1.0f, Config::RapidPierceChancePerPart * static_cast<float>(CountPart(PartKind::Pierce)));
+            world.AddPlayerBullet(b);
             return true;
         }
     };
@@ -95,7 +106,13 @@ namespace {
                 return false;
             }
             const Vec2 dir = (LeadTarget(origin, target.pos, target.vel, Config::BeamSpeed) - origin).Normalized();
-            world.FireBeam(origin + dir * Config::CoreRadius, dir * Config::BeamSpeed, Config::BeamDamage);
+            Beam b;
+            b.pos = origin + dir * Config::CoreRadius;
+            b.vel = dir * Config::BeamSpeed;
+            b.damage = Config::BeamDamage * PowerScale(Config::PartPowerRate);
+            b.decay = std::min(Config::BeamDecayMax,
+                               Config::BeamDecay + Config::BeamPierceDecayPerPart * static_cast<float>(CountPart(PartKind::Pierce)));
+            world.AddBeam(b);
             return true;
         }
     };
@@ -114,8 +131,17 @@ namespace {
                 return false;
             }
             const Vec2 toTarget = target.pos - origin;
-            const float heading = std::atan2(toTarget.y, toTarget.x);
-            world.FireMissile(origin + Vec2::FromAngle(heading) * Config::CoreRadius, heading, target);
+            Missile m;
+            m.heading = std::atan2(toTarget.y, toTarget.x);
+            m.pos = origin + Vec2::FromAngle(m.heading) * Config::CoreRadius;
+            m.targetKind = target.kind;
+            m.targetId = target.id;
+            m.damage = Config::MissileDamage * PowerScale(Config::PartPowerRate);
+            m.turnDegrees = Config::MissileTurnDegrees *
+                            (1.0f + Config::MissileHomingRate * static_cast<float>(CountPart(PartKind::Homing)));
+            m.blastRadius = Config::MissileExplosionRadius *
+                            (1.0f + Config::MissileBlastRate * static_cast<float>(CountPart(PartKind::BlastRadius)));
+            world.AddMissile(m);
             return true;
         }
     };
@@ -144,10 +170,107 @@ namespace {
                 return false;
             }
             const float distance = std::max(Config::CoreRadius + 10.0f, toCenter.Length() - Config::ShellShortDistance);
-            world.FireShell(origin + dir * Config::CoreRadius, dir * Config::ShellSpeed, distance - Config::CoreRadius);
+            Shell s;
+            s.pos = origin + dir * Config::CoreRadius;
+            s.vel = dir * Config::ShellSpeed;
+            s.distanceLeft = distance - Config::CoreRadius;
+            s.damageScale = PowerScale(Config::ShellPartPowerRate);
+            s.flameRadius = Config::ShellFlameRadius *
+                            (1.0f + Config::ShellFlameRadiusRate * static_cast<float>(CountPart(PartKind::FlameRadius)));
+            s.flameSeconds = Config::ShellFlameSeconds *
+                             (1.0f + Config::ShellFlameDurationRate * static_cast<float>(CountPart(PartKind::FlameDuration)));
+            s.fragmentCount = Config::ShellFragmentCount + Config::ShellFragmentsPerPart * CountPart(PartKind::Fragments);
+            world.AddShell(s);
             return true;
         }
     };
+}
+
+bool Weapon::RemovePart(PartKind part) {
+    for (size_t i = parts_.size(); i > 0; --i) {
+        if (parts_[i - 1] == part) {
+            parts_.erase(parts_.begin() + static_cast<std::ptrdiff_t>(i - 1));
+            return true;
+        }
+    }
+    return false;
+}
+
+int Weapon::CountPart(PartKind part) const {
+    return static_cast<int>(std::count(parts_.begin(), parts_.end(), part));
+}
+
+int Weapon::Energy() const {
+    const int n = static_cast<int>(parts_.size());
+    return WeaponEnergy(Kind()) + n * (n + 1) / 2;
+}
+
+WeaponFamily FamilyOf(WeaponKind kind) {
+    switch (kind) {
+    case WeaponKind::RapidGun: return WeaponFamily::RapidGun;
+    case WeaponKind::Beam: return WeaponFamily::Beam;
+    case WeaponKind::Missile: return WeaponFamily::Missile;
+    case WeaponKind::Shell: return WeaponFamily::Shell;
+    }
+    return WeaponFamily::RapidGun;
+}
+
+const std::vector<PartKind>& FamilyParts(WeaponFamily family) {
+    static const std::vector<PartKind> rapid = { PartKind::Power, PartKind::Rate, PartKind::Focus, PartKind::Pierce };
+    static const std::vector<PartKind> beam = { PartKind::Power, PartKind::Rate, PartKind::Pierce };
+    static const std::vector<PartKind> missile = { PartKind::Power, PartKind::Rate, PartKind::Homing, PartKind::BlastRadius };
+    static const std::vector<PartKind> shell = { PartKind::Power, PartKind::Rate, PartKind::FlameRadius,
+                                                 PartKind::FlameDuration, PartKind::Fragments };
+    switch (family) {
+    case WeaponFamily::RapidGun: return rapid;
+    case WeaponFamily::Beam: return beam;
+    case WeaponFamily::Missile: return missile;
+    case WeaponFamily::Shell: return shell;
+    }
+    return rapid;
+}
+
+const char* FamilyName(WeaponFamily family) {
+    switch (family) {
+    case WeaponFamily::RapidGun: return "速射砲";
+    case WeaponFamily::Beam: return "ビーム砲";
+    case WeaponFamily::Missile: return "誘導兵器";
+    case WeaponFamily::Shell: return "炸裂弾";
+    }
+    return "";
+}
+
+const char* PartName(PartKind part) {
+    switch (part) {
+    case PartKind::Power: return "威力強化";
+    case PartKind::Rate: return "連射強化";
+    case PartKind::Focus: return "収束";
+    case PartKind::Pierce: return "貫徹力強化";
+    case PartKind::Homing: return "誘導力強化";
+    case PartKind::BlastRadius: return "爆発範囲拡大";
+    case PartKind::FlameRadius: return "爆炎範囲拡大";
+    case PartKind::FlameDuration: return "爆炎持続延長";
+    case PartKind::Fragments: return "破片増加";
+    }
+    return "";
+}
+
+const char* PartDescription(WeaponFamily family, PartKind part) {
+    switch (part) {
+    case PartKind::Power:
+        return family == WeaponFamily::Shell ? "直撃・爆炎・破片の威力が上がる" : "威力が上がる";
+    case PartKind::Rate: return "撃つ間隔が短くなる";
+    case PartKind::Focus: return "弾のばらつきが小さくなる";
+    case PartKind::Pierce:
+        return family == WeaponFamily::Beam ? "貫くたびに下がる威力の幅が小さくなる"
+                                            : "当たったとき、確率で貫いて先へ進む";
+    case PartKind::Homing: return "曲がる力が上がり、避けられにくくなる";
+    case PartKind::BlastRadius: return "消えるときの爆発が大きくなる";
+    case PartKind::FlameRadius: return "炸裂したときの爆炎が大きくなる";
+    case PartKind::FlameDuration: return "爆炎がその場に残る時間が長くなる";
+    case PartKind::Fragments: return "まき散らす破片の数が増える";
+    }
+    return "";
 }
 
 const char* WeaponName(WeaponKind kind) {

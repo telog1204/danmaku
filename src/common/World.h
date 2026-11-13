@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <random>
+#include <string>
 #include <vector>
 #include "Vec2.h"
 #include "Weapon.h"
@@ -21,6 +22,8 @@ struct Bullet {
     float radius = 0.0f;
     float damage = 0.0f;
     float life = -1.0f;  // 残りの飛ぶ時間（秒）。負なら画面の外へ出るまで飛ぶ
+    float pierceChance = 0.0f; // 当たったときに貫く確率（速射砲の貫徹力強化）
+    int lastHitId = 0;   // 最後に貫いた相手の番号（同じ相手に続けて当たらないように）
     bool alive = true;
 };
 
@@ -30,6 +33,7 @@ struct Beam {
     Vec2 vel;
     float traveled = 0.0f;   // 撃ってから進んだ距離（尾は、これより長くは伸びない）
     float damage = 0.0f;
+    float decay = 0.0f;      // 1つ貫くごとに、威力がこの割合になる
     std::vector<int> hitIds; // もう貫いた敵の番号（同じ敵に何度も当たらないように）
     bool alive = true;
 
@@ -50,6 +54,9 @@ struct Missile {
     float age = 0.0f;
     TargetKind targetKind = TargetKind::None;
     int targetId = 0;
+    float damage = 0.0f;
+    float turnDegrees = 0.0f;   // 1秒間に曲がれる角度
+    float blastRadius = 0.0f;   // 消えるときの爆発の半径
     bool alive = true;
 };
 
@@ -58,7 +65,36 @@ struct Shell {
     Vec2 pos;
     Vec2 vel;
     float distanceLeft = 0.0f;  // 炸裂する位置までの残りの距離
+    float damageScale = 1.0f;   // 直撃・爆炎・破片の威力の倍率
+    float flameRadius = 0.0f;
+    float flameSeconds = 0.0f;
+    int fragmentCount = 0;
     bool alive = true;
+};
+
+// 倒した敵が落とすもの。落ちた場所に少しとどまってから、コアへ吸い寄せられて自動で拾われる
+enum class PickupKind {
+    Energy,  // エネルギー上限解放パーツ
+    Weapon,  // 武装
+    Part,    // 強化パーツ
+};
+
+struct Pickup {
+    PickupKind kind = PickupKind::Energy;
+    WeaponKind weapon = WeaponKind::RapidGun;      // 武装のとき
+    WeaponFamily family = WeaponFamily::RapidGun;  // 武装・強化パーツの系統
+    PartKind part = PartKind::Power;               // 強化パーツのとき
+    Vec2 pos;
+    float age = 0.0f;
+    float speed = 0.0f;
+    bool alive = true;
+};
+
+// 拾ったものを画面の上に出す知らせ
+struct Message {
+    std::string text;
+    PickupKind kind = PickupKind::Energy;
+    float life = 0.0f;
 };
 
 // 爆発・爆炎。残っているあいだ、触れた敵（1体につき1回）・敵の弾・誘導弾を巻き込む
@@ -112,9 +148,6 @@ public:
     // 最初からやり直す。開始時に持つ武装（速射砲に加える1つ）はランダムに選ぶ
     void Reset();
 
-    // 開始時に持つ武装を次のものに切り替えて、最初からやり直す（組み込み画面ができるまでの試し用）
-    void ResetWithNextStartWeapon();
-
     // ゲームの時間を dtSeconds 秒進める（ゲームオーバーのあいだは進めない）
     void Update(float dtSeconds);
 
@@ -131,6 +164,8 @@ public:
     const std::vector<Shell>& Shells() const { return shells_; }
     const std::vector<Explosion>& Explosions() const { return explosions_; }
     const std::vector<std::unique_ptr<Weapon>>& Weapons() const { return weapons_; }
+    const std::vector<Pickup>& Pickups() const { return pickups_; }
+    const std::vector<Message>& Messages() const { return messages_; }
 
     // 組み込み画面から使うもの
     const std::vector<WeaponKind>& OwnedWeapons() const { return ownedWeapons_; }
@@ -138,7 +173,14 @@ public:
     int UsedEnergy() const;
     bool CanEquip(WeaponKind kind) const;  // エネルギーが足りるか
     void Equip(WeaponKind kind);           // 1つ積む（足りなければ何もしない）
-    void Unequip(size_t index);            // 積んでいる武装の index 番目を外す
+    void Unequip(size_t index);            // 積んでいる武装の index 番目を外す（付けていた強化パーツは手元に戻る）
+    int SpareParts(WeaponFamily family, PartKind part) const;  // 持っている（付けていない）強化パーツの数
+    bool CanAttachPart(size_t weaponIndex, PartKind part) const; // 強化パーツを持っていて、エネルギーが足りるか
+    void AttachPart(size_t weaponIndex, PartKind part);
+    void DetachPart(size_t weaponIndex, PartKind part);
+
+    // 拾ったものを手に入れる（落とし物を拾ったときに呼ぶ。試験からも使う）
+    void Collect(const Pickup& pickup);
 
     // 武装や敵の動きから使うもの
     std::mt19937& Rng() { return rng_; }
@@ -151,14 +193,13 @@ public:
     // 敵が多い場所の中心（敵本体がいなければ false）
     bool FindCrowdCenter(Vec2& center) const;
 
-    void FirePlayerBullet(const Vec2& pos, const Vec2& vel, float radius, float damage, float life = -1.0f);
+    void AddPlayerBullet(const Bullet& b) { playerBullets_.push_back(b); }
     void FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, float damage);
-    void FireBeam(const Vec2& pos, const Vec2& vel, float damage);
-    void FireMissile(const Vec2& pos, float heading, const Target& target);
-    void FireShell(const Vec2& pos, const Vec2& vel, float distance);
+    void AddBeam(const Beam& b) { beams_.push_back(b); }
+    void AddMissile(const Missile& m) { missiles_.push_back(m); }
+    void AddShell(const Shell& s) { shells_.push_back(s); }
 
 private:
-    void ResetWithStartWeapon(int startWeaponIndex);
     void Step(float dt);
     void SpawnEnemy();
     void MoveBullets(std::vector<Bullet>& bullets, float dt);
@@ -166,18 +207,25 @@ private:
     void MoveMissiles(float dt);
     void MoveShells(float dt);
     void AgeExplosions(float dt);
+    void MovePickups(float dt);
+    void AgeMessages(float dt);
+    void DropItems(const Enemy& e);
+    void AddMessage(const std::string& text, PickupKind kind);
     void HandleCollisions();
     void DamageEnemy(Enemy& e, float damage);
     void DetonateMissile(Missile& m);
     void BurstShell(Shell& s);
     void AddExplosion(const Vec2& pos, float radius, float damage, float seconds);
+    bool HitWithBullet(Bullet& b, int targetId);  // 速射砲の弾が当たったとき。貫いて進むなら true
     void RemoveDead();
 
     Core core_;
     std::vector<std::unique_ptr<Weapon>> weapons_;  // 積んでいる武装
     std::vector<WeaponKind> ownedWeapons_;          // 持っている武装（種類ごとに1つ）
+    int spareParts_[WeaponFamilyCount][PartKindCount] = {};  // 持っている（付けていない）強化パーツの数
     int energyCap_ = 0;
-    int startWeaponIndex_ = 0;
+    int exp_ = 0;      // 見えない経験値
+    int expNeed_ = 0;  // 次のエネルギー上限解放パーツまでに必要な経験値
     std::vector<Enemy> enemies_;
     std::vector<Bullet> playerBullets_;
     std::vector<Bullet> enemyBullets_;
@@ -186,6 +234,8 @@ private:
     std::vector<Shell> shells_;
     std::vector<Explosion> explosions_;
     std::vector<Explosion> pendingExplosions_;  // 当たり判定の途中で起きた爆発（判定が終わってから加える）
+    std::vector<Pickup> pickups_;
+    std::vector<Message> messages_;
     std::mt19937 rng_;
     int nextId_ = 1;
     float elapsed_ = 0.0f;

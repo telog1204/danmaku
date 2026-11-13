@@ -59,26 +59,22 @@ World::World() : rng_(static_cast<unsigned int>(GetNowHiPerformanceCount())) {
 }
 
 void World::Reset() {
-    ResetWithStartWeapon(std::uniform_int_distribution<int>(0, StartWeaponChoiceCount - 1)(rng_));
-}
-
-void World::ResetWithNextStartWeapon() {
-    ResetWithStartWeapon((startWeaponIndex_ + 1) % StartWeaponChoiceCount);
-}
-
-void World::ResetWithStartWeapon(int startWeaponIndex) {
     core_.pos = Vec2(Config::ScreenWidth * 0.5f, Config::ScreenHeight * 0.5f);
     core_.radius = Config::CoreRadius;
     core_.maxHp = Config::CoreMaxHp;
     core_.hp = core_.maxHp;
 
-    // 組み込み画面ができるまでは、開始時の武装をエネルギー上限に収まるように自動で積む。
-    // ランダムに選んだ武装を1つ積み、残ったエネルギーで速射砲を積めるだけ積む
-    startWeaponIndex_ = startWeaponIndex;
+    // 開始時は、速射砲に加えてランダムに選んだ武装を1つ持つ。
+    // 最初はエネルギー上限に収まるように自動で積む（ランダムな武装を1つ、残ったエネルギーで速射砲を積めるだけ）
     weapons_.clear();
-    const WeaponKind start = StartWeaponChoices[startWeaponIndex_];
+    const WeaponKind start = StartWeaponChoices[std::uniform_int_distribution<int>(0, StartWeaponChoiceCount - 1)(rng_)];
     ownedWeapons_ = { WeaponKind::RapidGun, start };
+    for (auto& row : spareParts_) {
+        for (int& n : row) n = 0;
+    }
     energyCap_ = Config::StartEnergy;
+    exp_ = 0;
+    expNeed_ = Config::ExpFirstNeed;
     weapons_.push_back(CreateWeapon(start, 0.0f));
     int energyLeft = Config::StartEnergy - WeaponEnergy(start);
     int rapidCount = 0;
@@ -97,6 +93,8 @@ void World::ResetWithStartWeapon(int startWeaponIndex) {
     shells_.clear();
     explosions_.clear();
     pendingExplosions_.clear();
+    pickups_.clear();
+    messages_.clear();
     nextId_ = 1;
     elapsed_ = 0.0f;
     spawnTimer_ = 0.0f;
@@ -107,7 +105,7 @@ void World::ResetWithStartWeapon(int startWeaponIndex) {
 int World::UsedEnergy() const {
     int used = 0;
     for (const auto& w : weapons_) {
-        used += WeaponEnergy(w->Kind());
+        used += w->Energy();
     }
     return used;
 }
@@ -125,9 +123,87 @@ void World::Equip(WeaponKind kind) {
 }
 
 void World::Unequip(size_t index) {
-    if (index < weapons_.size()) {
-        weapons_.erase(weapons_.begin() + static_cast<std::ptrdiff_t>(index));
+    if (index >= weapons_.size()) {
+        return;
     }
+    // 付けていた強化パーツは手元に戻す
+    const int family = static_cast<int>(FamilyOf(weapons_[index]->Kind()));
+    for (PartKind part : weapons_[index]->Parts()) {
+        ++spareParts_[family][static_cast<int>(part)];
+    }
+    weapons_.erase(weapons_.begin() + static_cast<std::ptrdiff_t>(index));
+}
+
+int World::SpareParts(WeaponFamily family, PartKind part) const {
+    return spareParts_[static_cast<int>(family)][static_cast<int>(part)];
+}
+
+bool World::CanAttachPart(size_t weaponIndex, PartKind part) const {
+    if (weaponIndex >= weapons_.size()) {
+        return false;
+    }
+    const Weapon& w = *weapons_[weaponIndex];
+    return SpareParts(FamilyOf(w.Kind()), part) > 0 && UsedEnergy() + w.NextPartEnergy() <= energyCap_;
+}
+
+void World::AttachPart(size_t weaponIndex, PartKind part) {
+    if (!CanAttachPart(weaponIndex, part)) {
+        return;
+    }
+    Weapon& w = *weapons_[weaponIndex];
+    --spareParts_[static_cast<int>(FamilyOf(w.Kind()))][static_cast<int>(part)];
+    w.AddPart(part);
+}
+
+void World::DetachPart(size_t weaponIndex, PartKind part) {
+    if (weaponIndex >= weapons_.size()) {
+        return;
+    }
+    Weapon& w = *weapons_[weaponIndex];
+    if (w.RemovePart(part)) {
+        ++spareParts_[static_cast<int>(FamilyOf(w.Kind()))][static_cast<int>(part)];
+    }
+}
+
+void World::Collect(const Pickup& pickup) {
+    switch (pickup.kind) {
+    case PickupKind::Energy: {
+        ++energyCap_;
+        AddMessage("エネルギー上限が1増えた（上限 " + std::to_string(energyCap_) + "）", pickup.kind);
+        break;
+    }
+    case PickupKind::Weapon:
+        if (std::find(ownedWeapons_.begin(), ownedWeapons_.end(), pickup.weapon) == ownedWeapons_.end()) {
+            ownedWeapons_.push_back(pickup.weapon);
+            AddMessage(std::string(WeaponName(pickup.weapon)) + " を手に入れた", pickup.kind);
+        } else {
+            // 同じ武装を続けて拾ったときは、その系統の強化パーツにする
+            Pickup part = pickup;
+            part.kind = PickupKind::Part;
+            const auto& parts = FamilyParts(pickup.family);
+            part.part = parts[std::uniform_int_distribution<size_t>(0, parts.size() - 1)(rng_)];
+            Collect(part);
+        }
+        break;
+    case PickupKind::Part:
+        ++spareParts_[static_cast<int>(pickup.family)][static_cast<int>(pickup.part)];
+        AddMessage(std::string(FamilyName(pickup.family)) + "の強化パーツ「" + PartName(pickup.part) + "」を手に入れた",
+                   pickup.kind);
+        break;
+    }
+}
+
+void World::AddMessage(const std::string& text, PickupKind kind) {
+    // 画面の上に並べるのは新しいものから4つまで
+    constexpr size_t MaxMessages = 4;
+    if (messages_.size() >= MaxMessages) {
+        messages_.erase(messages_.begin());
+    }
+    Message m;
+    m.text = text;
+    m.kind = kind;
+    m.life = Config::MessageSeconds;
+    messages_.push_back(m);
 }
 
 float World::RandomRange(float min, float max) {
@@ -214,16 +290,6 @@ bool World::FindCrowdCenter(Vec2& center) const {
     return bestCount > 0;
 }
 
-void World::FirePlayerBullet(const Vec2& pos, const Vec2& vel, float radius, float damage, float life) {
-    Bullet b;
-    b.pos = pos;
-    b.vel = vel;
-    b.radius = radius;
-    b.damage = damage;
-    b.life = life;
-    playerBullets_.push_back(b);
-}
-
 void World::FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, float damage) {
     Bullet b;
     b.id = nextId_++;
@@ -232,31 +298,6 @@ void World::FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, floa
     b.radius = radius;
     b.damage = damage;
     enemyBullets_.push_back(b);
-}
-
-void World::FireBeam(const Vec2& pos, const Vec2& vel, float damage) {
-    Beam b;
-    b.pos = pos;
-    b.vel = vel;
-    b.damage = damage;
-    beams_.push_back(b);
-}
-
-void World::FireMissile(const Vec2& pos, float heading, const Target& target) {
-    Missile m;
-    m.pos = pos;
-    m.heading = heading;
-    m.targetKind = target.kind;
-    m.targetId = target.id;
-    missiles_.push_back(m);
-}
-
-void World::FireShell(const Vec2& pos, const Vec2& vel, float distance) {
-    Shell s;
-    s.pos = pos;
-    s.vel = vel;
-    s.distanceLeft = distance;
-    shells_.push_back(s);
 }
 
 void World::Update(float dtSeconds) {
@@ -298,6 +339,8 @@ void World::Step(float dt) {
     MoveShells(dt);
     AgeExplosions(dt);
     HandleCollisions();
+    MovePickups(dt);
+    AgeMessages(dt);
     RemoveDead();
 
     if (core_.hp <= 0) {
@@ -388,8 +431,8 @@ void World::MoveBeams(float dt) {
 }
 
 void World::MoveMissiles(float dt) {
-    const float maxTurn = Config::MissileTurnDegrees * Pi / 180.0f * dt;
     for (Missile& m : missiles_) {
+        const float maxTurn = m.turnDegrees * Pi / 180.0f * dt;
         m.age += dt;
         if (m.age > Config::MissileLifeSeconds || IsFarOutside(m.pos)) {
             m.alive = false;
@@ -436,11 +479,86 @@ void World::AgeExplosions(float dt) {
     }
 }
 
+void World::MovePickups(float dt) {
+    for (Pickup& p : pickups_) {
+        p.age += dt;
+        if (p.age < Config::PickupWaitSeconds) {
+            continue;  // 落ちた場所に少しとどまる
+        }
+        // コアへ吸い寄せられ、だんだん速くなる
+        p.speed = std::min(Config::PickupMaxSpeed, p.speed + Config::PickupAcceleration * dt);
+        const Vec2 toCore = core_.pos - p.pos;
+        const float dist = toCore.Length();
+        const float step = p.speed * dt;
+        if (dist <= core_.radius + Config::PickupRadius || dist <= step) {
+            p.alive = false;
+            Collect(p);
+        } else {
+            p.pos += toCore * (step / dist);
+        }
+    }
+}
+
+void World::AgeMessages(float dt) {
+    for (Message& m : messages_) {
+        m.life -= dt;
+    }
+    messages_.erase(std::remove_if(messages_.begin(), messages_.end(), [](const Message& m) { return m.life <= 0.0f; }),
+                    messages_.end());
+}
+
+void World::DropItems(const Enemy& e) {
+    // 見えない経験値がたまったら、エネルギー上限解放パーツを落とす
+    exp_ += (e.type == EnemyType::Evader) ? Config::EvaderExp : 1;
+    while (exp_ >= expNeed_) {
+        exp_ -= expNeed_;
+        expNeed_ += Config::ExpNeedGrowth;
+        Pickup p;
+        p.kind = PickupKind::Energy;
+        p.pos = e.pos + Vec2(RandomRange(-8.0f, 8.0f), RandomRange(-8.0f, 8.0f));
+        p.speed = Config::PickupStartSpeed;
+        pickups_.push_back(p);
+    }
+
+    // 一定の確率で、武装か強化パーツを落とす。武装をランダムに1つ選び、持っていなければその武装、持っていれば強化パーツにする
+    if (RandomRange(0.0f, 1.0f) >= Config::DropChance) {
+        return;
+    }
+    Pickup p;
+    p.weapon = static_cast<WeaponKind>(std::uniform_int_distribution<int>(0, WeaponKindCount - 1)(rng_));
+    p.family = FamilyOf(p.weapon);
+    if (std::find(ownedWeapons_.begin(), ownedWeapons_.end(), p.weapon) == ownedWeapons_.end()) {
+        p.kind = PickupKind::Weapon;
+    } else {
+        p.kind = PickupKind::Part;
+        const auto& parts = FamilyParts(p.family);
+        p.part = parts[std::uniform_int_distribution<size_t>(0, parts.size() - 1)(rng_)];
+    }
+    p.pos = e.pos + Vec2(RandomRange(-8.0f, 8.0f), RandomRange(-8.0f, 8.0f));
+    p.speed = Config::PickupStartSpeed;
+    pickups_.push_back(p);
+}
+
 void World::DamageEnemy(Enemy& e, float damage) {
+    if (!e.alive) {
+        return;
+    }
     e.hp -= damage;
     if (e.hp <= 0.0f) {
         e.alive = false;
+        DropItems(e);
     }
+}
+
+bool World::HitWithBullet(Bullet& b, int targetId) {
+    // 貫徹力強化を付けた速射砲の弾は、確率で貫いて先へ進む（威力は下がる）
+    if (b.pierceChance > 0.0f && RandomRange(0.0f, 1.0f) < b.pierceChance) {
+        b.damage *= Config::RapidPierceDecay;
+        b.lastHitId = targetId;
+        return true;
+    }
+    b.alive = false;
+    return false;
 }
 
 void World::AddExplosion(const Vec2& pos, float radius, float damage, float seconds) {
@@ -456,42 +574,45 @@ void World::AddExplosion(const Vec2& pos, float radius, float damage, float seco
 void World::DetonateMissile(Missile& m) {
     if (!m.alive) return;
     m.alive = false;
-    AddExplosion(m.pos, Config::MissileExplosionRadius, Config::MissileExplosionDamage, Config::MissileExplosionSeconds);
+    AddExplosion(m.pos, m.blastRadius, Config::MissileExplosionDamage, Config::MissileExplosionSeconds);
 }
 
 void World::BurstShell(Shell& s) {
     if (!s.alive) return;
     s.alive = false;
     // その場に残る大きな爆炎
-    AddExplosion(s.pos, Config::ShellFlameRadius, Config::ShellFlameDamage, Config::ShellFlameSeconds);
+    AddExplosion(s.pos, s.flameRadius, Config::ShellFlameDamage * s.damageScale, s.flameSeconds);
     // 進んでいた方向の前方へ、円錐形に破片をまく
     const float baseAngle = std::atan2(s.vel.y, s.vel.x);
     const float spread = Config::ShellFragmentSpreadDegrees * Pi / 180.0f;
-    for (int i = 0; i < Config::ShellFragmentCount; ++i) {
+    for (int i = 0; i < s.fragmentCount; ++i) {
         const float angle = baseAngle + RandomRange(-spread, spread);
-        const float speed = Config::ShellFragmentSpeed * RandomRange(0.8f, 1.2f);
-        FirePlayerBullet(s.pos, Vec2::FromAngle(angle) * speed, Config::FragmentRadius,
-                         Config::ShellFragmentDamage, Config::ShellFragmentSeconds);
+        Bullet f;
+        f.pos = s.pos;
+        f.vel = Vec2::FromAngle(angle) * (Config::ShellFragmentSpeed * RandomRange(0.8f, 1.2f));
+        f.radius = Config::FragmentRadius;
+        f.damage = Config::ShellFragmentDamage * s.damageScale;
+        f.life = Config::ShellFragmentSeconds;
+        playerBullets_.push_back(f);
     }
 }
 
 void World::HandleCollisions() {
-    // 速射砲の弾・破片：敵の弾とぶつかると両方消える。敵本体に当たると消える（貫かない）
+    // 速射砲の弾・破片：敵の弾とぶつかると敵の弾は消える。敵本体に当たると威力を与える。
+    // 弾はふつうそこで消えるが、貫徹力強化があれば確率で貫いて先へ進む
     for (Bullet& pb : playerBullets_) {
         if (!pb.alive) continue;
         for (Bullet& eb : enemyBullets_) {
             if (eb.alive && Overlaps(pb.pos, pb.radius, eb.pos, eb.radius)) {
-                pb.alive = false;
                 eb.alive = false;
-                break;
+                if (!HitWithBullet(pb, eb.id)) break;
             }
         }
         if (!pb.alive) continue;
         for (Enemy& e : enemies_) {
-            if (e.alive && Overlaps(pb.pos, pb.radius, e.pos, e.radius)) {
-                pb.alive = false;
+            if (e.alive && e.id != pb.lastHitId && Overlaps(pb.pos, pb.radius, e.pos, e.radius)) {
                 DamageEnemy(e, pb.damage);
-                break;
+                if (!HitWithBullet(pb, e.id)) break;
             }
         }
     }
@@ -505,7 +626,7 @@ void World::HandleCollisions() {
             const float r = eb.radius + Config::BeamHalfWidth;
             if (DistanceSqToSegment(eb.pos, tail, b.pos) <= r * r) {
                 eb.alive = false;
-                b.damage *= Config::BeamDecay;
+                b.damage *= b.decay;
             }
         }
         for (Enemy& e : enemies_) {
@@ -514,7 +635,7 @@ void World::HandleCollisions() {
             if (DistanceSqToSegment(e.pos, tail, b.pos) <= r * r) {
                 b.hitIds.push_back(e.id);
                 DamageEnemy(e, b.damage);
-                b.damage *= Config::BeamDecay;
+                b.damage *= b.decay;
             }
         }
     }
@@ -524,7 +645,7 @@ void World::HandleCollisions() {
         if (!m.alive) continue;
         for (Enemy& e : enemies_) {
             if (e.alive && Overlaps(m.pos, Config::MissileRadius, e.pos, e.radius)) {
-                DamageEnemy(e, Config::MissileDamage);
+                DamageEnemy(e, m.damage);
                 DetonateMissile(m);
                 break;
             }
@@ -544,7 +665,7 @@ void World::HandleCollisions() {
         if (!s.alive) continue;
         for (Enemy& e : enemies_) {
             if (e.alive && Overlaps(s.pos, Config::ShellRadius, e.pos, e.radius)) {
-                DamageEnemy(e, Config::ShellDirectDamage);
+                DamageEnemy(e, Config::ShellDirectDamage * s.damageScale);
                 BurstShell(s);
                 break;
             }
@@ -613,4 +734,5 @@ void World::RemoveDead() {
     EraseDead(missiles_);
     EraseDead(shells_);
     EraseDead(explosions_);
+    EraseDead(pickups_);
 }
