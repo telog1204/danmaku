@@ -84,9 +84,17 @@ namespace {
             }
             y -= 20;
         }
-        const char* hint = "右クリック（2本指タップ）：開始武装を切り替え";
-        const int hintW = GetDrawStringWidth(hint, static_cast<int>(std::strlen(hint)));
-        DrawString(Config::ScreenWidth - 10 - hintW, Config::ScreenHeight - 22, hint, GetColor(140, 140, 160));
+
+        // 拾ったものの知らせ（画面の上、新しいものほど下）
+        int my = 70;
+        for (const Message& m : world.Messages()) {
+            unsigned int color = GetColor(255, 233, 160);
+            if (m.kind == PickupKind::Part) color = GetColor(217, 194, 255);
+            if (m.kind == PickupKind::Weapon) color = GetColor(200, 240, 255);
+            const int w = GetDrawStringWidth(m.text.c_str(), static_cast<int>(m.text.size()));
+            DrawString((Config::ScreenWidth - w) / 2, my, m.text.c_str(), color);
+            my += 22;
+        }
     }
 
     void DrawBeam(const Beam& b) {
@@ -106,6 +114,43 @@ namespace {
         const Vec2 flame = m.pos - f * 9.0f;
         DrawCircle(Px(flame.x), Px(flame.y), 3, GetColor(90, 50, 10), TRUE);
         DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 230, 90), TRUE);
+    }
+
+    // 系統の色（落とし物に使う）
+    void FamilyColor(WeaponFamily family, int& r, int& g, int& b) {
+        switch (family) {
+        case WeaponFamily::RapidGun: r = 80; g = 220; b = 230; return;
+        case WeaponFamily::Beam: r = 90; g = 140; b = 255; return;
+        case WeaponFamily::Missile: r = 230; g = 210; b = 60; return;
+        case WeaponFamily::Shell: r = 255; g = 140; b = 40; return;
+        }
+        r = g = b = 255;
+    }
+
+    void DrawPickup(const Pickup& p) {
+        const int x = Px(p.pos.x);
+        const int y = Px(p.pos.y);
+        int r = 255, g = 215, b = 106;
+        switch (p.kind) {
+        case PickupKind::Energy:
+            // 黄色のひし形
+            DrawCircle(x, y, 14, GetColor(60, 50, 20), TRUE);
+            DrawTriangle(x, y - 9, x - 9, y, x + 9, y, GetColor(255, 215, 106), TRUE);
+            DrawTriangle(x, y + 9, x - 9, y, x + 9, y, GetColor(255, 215, 106), TRUE);
+            break;
+        case PickupKind::Weapon:
+            // 白い四角（ふちは系統の色）
+            FamilyColor(p.family, r, g, b);
+            DrawCircle(x, y, 14, GetColor(r / 5, g / 5, b / 5), TRUE);
+            DrawBox(x - 8, y - 8, x + 9, y + 9, GetColor(r, g, b), TRUE);
+            DrawBox(x - 5, y - 5, x + 6, y + 6, GetColor(255, 255, 255), TRUE);
+            break;
+        case PickupKind::Part:
+            // 小さな丸（系統の色）
+            FamilyColor(p.family, r, g, b);
+            DrawGlowCircle(p.pos, 6.0f, r, g, b);
+            break;
+        }
     }
 
     void DrawExplosion(const Explosion& x) {
@@ -161,6 +206,9 @@ void DrawWorld(const World& world) {
     }
     for (const Shell& s : world.Shells()) {
         DrawGlowCircle(s.pos, Config::ShellRadius, 255, 140, 40);
+    }
+    for (const Pickup& p : world.Pickups()) {
+        DrawPickup(p);
     }
     for (const Bullet& b : world.EnemyBullets()) {
         DrawGlowCircle(b.pos, b.radius, 255, 90, 160);

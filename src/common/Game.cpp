@@ -9,22 +9,14 @@ void Game::Update(double dtSeconds) {
     // 入力は Platform::PollInput() で読む（マウスとタッチを同じ形で受け取れる）
     const InputState input = Platform::PollInput();
     const bool pressed = input.primaryDown && !prevPrimaryDown_;
-    const bool secondaryPressed = input.secondaryDown && !prevSecondaryDown_;
     prevPrimaryDown_ = input.primaryDown;
-    prevSecondaryDown_ = input.secondaryDown;
     const float dt = static_cast<float>(dtSeconds);
 
     // 組み込み画面を開いている間は、ゲームの時間を進めない
     if (mode_ == Mode::Build) {
-        if (buildScreen_.Update(world_, pressed, input.x, input.y, dt)) {
+        if (buildScreen_.Update(world_, input, dt)) {
             mode_ = Mode::Battle;
         }
-        return;
-    }
-
-    // 右クリック（2本指タップ）で、開始時の武装を切り替えて最初からやり直す（拾う仕組みができるまでの試し用）
-    if (secondaryPressed) {
-        world_.ResetWithNextStartWeapon();
         return;
     }
 
