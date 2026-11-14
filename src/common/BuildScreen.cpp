@@ -352,7 +352,7 @@ void BuildScreen::Draw(const World& world) const {
     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
     DrawBox(PanelX, PanelY, PanelX + PanelW, PanelY + PanelH, GetColor(17, 26, 42), TRUE);
     DrawBox(PanelX, PanelY, PanelX + PanelW, PanelY + PanelH, GetColor(74, 106, 144), FALSE);
-    DrawString(PartLeftX, PanelY + 20, WeaponName(w.Kind()), GetColor(255, 255, 255));
+    DrawString(PartLeftX, PanelY + 20, WeaponName(w.Kind()).c_str(), GetColor(255, 255, 255));
     const int partsEnergy = w.Energy() - WeaponEnergy(w.Kind());
     DrawFormatString(PartLeftX, PanelY + 50, GetColor(255, 215, 106), "この武装のエネルギー　%d（本体 %d ＋ 強化パーツ %d）",
                      w.Energy(), WeaponEnergy(w.Kind()), partsEnergy);

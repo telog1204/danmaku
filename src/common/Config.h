@@ -72,6 +72,32 @@ namespace Config {
     constexpr float FragmentRadius = 2.0f;
     constexpr int ShellEnergy = 3;
 
+    // 派生版（上の基本型との違い）
+    constexpr float RapidSweepDegrees = 30.0f;       // 速射砲 弾幕型・攻撃型：扇形に往復する幅（片側の角度）
+    constexpr float RapidSweepSpeedDegrees = 120.0f; // 往復する速さ（度/秒）
+    constexpr float RapidCloseInterval = 0.05f;      // 速射砲 近接防御型：撃つ間隔
+    constexpr float RapidCloseRange = 150.0f;        // 速射砲 近接防御型：射程（これより遠くには撃たない）
+    constexpr int RapidBarrageEnergy = 2;
+    constexpr int RapidAttackEnergy = 2;
+    constexpr int RapidCloseEnergy = 2;
+    constexpr float BeamDecisiveDamageScale = 2.0f;  // ビーム砲 決戦型：威力（基本型に対する倍率）
+    constexpr float BeamDecisiveIntervalScale = 2.0f; // ビーム砲 決戦型：撃つ間隔（基本型に対する倍率）
+    constexpr int BeamAttackEnergy = 3;
+    constexpr int BeamDecisiveEnergy = 3;
+    constexpr float MissileAttackBlastScale = 2.0f;  // 誘導兵器 攻撃型：消えるときの爆発の半径（基本型に対する倍率）
+    constexpr float MissileCloseRange = 180.0f;      // 誘導兵器 近接防御型：この距離に来たものだけを撃つ
+    constexpr int MissileAttackEnergy = 3;
+    constexpr int MissileCloseEnergy = 2;
+    constexpr float ShellDecisiveRange = 2000.0f;    // 炸裂弾 決戦型：直撃を狙うので、途中で炸裂しない距離にする
+    constexpr int ShellDecisiveEnergy = 4;
+
+    // 連装型
+    constexpr float MultiBarrelEnergyRate = 0.8f;    // エネルギー＝元のエネルギー×門数×この割合（四捨五入、最低でも元＋1）
+    constexpr float RapidBarrelSpacing = 8.0f;       // 並べた砲の間隔（ドット）
+    constexpr float BeamBarrelSpacing = 10.0f;
+    constexpr float ShellBarrelSpacing = 12.0f;
+    constexpr float MissileBarrelSpreadDegrees = 10.0f; // 誘導兵器：撃ち出す向きを1門ごとにずらす角度
+
     // 開始時のエネルギー上限
     constexpr int StartEnergy = 3;
 

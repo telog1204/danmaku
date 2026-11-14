@@ -101,9 +101,9 @@ namespace {
                 ++i;
             }
             if (n > 1) {
-                DrawFormatString(10, y, GetColor(200, 230, 255), "%s ×%d", WeaponName(kind), static_cast<int>(n));
+                DrawFormatString(10, y, GetColor(200, 230, 255), "%s ×%d", WeaponName(kind).c_str(), static_cast<int>(n));
             } else {
-                DrawFormatString(10, y, GetColor(200, 230, 255), "%s", WeaponName(kind));
+                DrawFormatString(10, y, GetColor(200, 230, 255), "%s", WeaponName(kind).c_str());
             }
             y -= 20;
         }
