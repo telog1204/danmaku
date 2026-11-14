@@ -108,6 +108,8 @@ void World::Reset() {
     messages_.clear();
     rewardChoices_.clear();
     bossTimer_ = Config::BossInterval;
+    kills_ = 0;
+    bossKills_ = 0;
     nextId_ = 1;
     elapsed_ = 0.0f;
     spawnTimer_ = 0.0f;
@@ -715,8 +717,10 @@ void World::DamageEnemy(Enemy& e, float damage) {
         e.alive = false;
         if (e.type == EnemyType::Boss) {
             // 強敵は落とし物を落とさず、代わりに報酬を選べる
+            ++bossKills_;
             MakeRewardChoices();
         } else {
+            ++kills_;
             DropItems(e);
         }
     }
