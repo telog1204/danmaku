@@ -93,10 +93,12 @@ namespace Config {
 
     // 連装型
     constexpr float MultiBarrelEnergyRate = 0.8f;    // エネルギー＝元のエネルギー×門数×この割合（四捨五入、最低でも元＋1）
-    constexpr float RapidBarrelSpacing = 8.0f;       // 並べた砲の間隔（ドット）
-    constexpr float BeamBarrelSpacing = 10.0f;
-    constexpr float ShellBarrelSpacing = 12.0f;
-    constexpr float MissileBarrelSpreadDegrees = 10.0f; // 誘導兵器：撃ち出す向きを1門ごとにずらす角度
+    constexpr float RapidBarrelSpacing = 8.0f;       // 速射砲：並べた砲の間隔（ドット）
+    constexpr float BeamBarrelSpacing = 10.0f;       // ビーム砲：並べた砲の間隔（ドット）
+    constexpr float BeamVolleyGap = 0.05f;           // ビーム砲：一斉射で1門ずつずらす時間（秒）
+    constexpr float MissileVolleyGap = 0.08f;        // 誘導兵器：一斉射で1門ずつずらす時間（秒）
+    constexpr float ShellVolleyGap = 0.1f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）
+    constexpr float ShellFanDegrees = 8.0f;          // 炸裂弾：扇形で1門ごとに向きを変える角度
 
     // 開始時のエネルギー上限
     constexpr int StartEnergy = 3;
