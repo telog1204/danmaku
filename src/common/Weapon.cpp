@@ -51,6 +51,28 @@ namespace {
         return (static_cast<float>(i) - (barrels - 1) * 0.5f) * spacing;
     }
 
+    // ロックオン：近い順に3番目までの中からランダムに1つ選び、その相手が倒れるか消える（射程の外へ出る）まで狙い続ける
+    class LockOn {
+    public:
+        // 今ロックオンしている相手を返す。外れていたら選び直す（狙うものがいなければ kind が None）
+        Target Get(World& world, const Vec2& from, float maxRange, bool bodiesFirst) {
+            if (kind_ != TargetKind::None) {
+                const Target t = world.FindTargetById(kind_, id_);
+                if (t.kind != TargetKind::None && (t.pos - from).LengthSq() <= maxRange * maxRange) {
+                    return t;
+                }
+            }
+            const Target t = world.PickLockOnTarget(from, maxRange, bodiesFirst);
+            kind_ = t.kind;
+            id_ = t.id;
+            return t;
+        }
+
+    private:
+        TargetKind kind_ = TargetKind::None;
+        int id_ = 0;
+    };
+
     // 撃つ間隔を数える部分は、どの武装も同じ。連射強化を付けるほど間隔が短くなる。
     // volleyGap が 0 より大きい武装は、撃つ時間が来るたびに「一斉射」として、1門ずつ volleyGap 秒ずつずらして門数分を続けて撃つ
     class TimedWeapon : public Weapon {
@@ -147,26 +169,50 @@ namespace {
         // 毎回、狙う方向を決めて、そちらへ砲を旋回させる（1秒間に回れる角度には上限がある）
         void Think(World& world, float dt) override {
             float desired = 0.0f;
-            hasTarget_ = DesiredAngle(world, desired);
+            Target tracked;
+            hasTarget_ = DesiredAngle(world, desired, tracked);
+
+            // 狙っていた相手がいなくなったかを見る（次の相手を狙うときの旋回の仕方を決めるため）
+            if (trackedKind_ != TargetKind::None && (tracked.kind != trackedKind_ || tracked.id != trackedId_) &&
+                world.FindTargetById(trackedKind_, trackedId_).kind == TargetKind::None) {
+                lostTarget_ = true;
+            }
+            trackedKind_ = tracked.kind;
+            trackedId_ = tracked.id;
+
             if (Kind().variant == WeaponVariant::RapidClose) {
                 // 近接防御型：ふだんは待ち、射程内に何か入った瞬間にそちらへ向き直って撃ち始める。
                 // 射程内に何もいなくなったら、撃つのをやめて待つ状態に戻る
                 if (hasTarget_ && !engaged_) {
                     facing_ = desired;
+                    lostTarget_ = false;
+                    fastTurning_ = false;
                 }
                 engaged_ = hasTarget_;
             }
             if (!hasTarget_) {
                 return;  // 狙うものがいなければ、向きはそのまま
             }
-            const float maxTurn = DegreesToRadians(Config::RapidTurnDegrees) * dt;
+
+            // 狙っていた相手がいなくなって次の相手を狙うとき：角度の差が大きければ、撃つのをやめて速く旋回する
+            if (lostTarget_) {
+                lostTarget_ = false;
+                if (std::fabs(WrapAngle(desired - facing_)) > DegreesToRadians(Config::RapidRetargetDegrees)) {
+                    fastTurning_ = true;
+                }
+            }
+            const float turnDegrees = fastTurning_ ? Config::RapidFastTurnDegrees : Config::RapidTurnDegrees;
+            const float maxTurn = DegreesToRadians(turnDegrees) * dt;
             facing_ = WrapAngle(facing_ + std::max(-maxTurn, std::min(maxTurn, WrapAngle(desired - facing_))));
+            if (fastTurning_ && std::fabs(WrapAngle(desired - facing_)) <= DegreesToRadians(Config::RapidResumeDegrees)) {
+                fastTurning_ = false;  // 向き直ったら、撃つのを再開してふだんの旋回に戻る
+            }
         }
 
         // 弾は、狙う方向ではなく今向いている方向へ出る（旋回中も撃ち続ける）
         bool FireShot(World& world, int /*shot*/) override {
-            if (!hasTarget_) {
-                return false;
+            if (!hasTarget_ || fastTurning_) {
+                return false;  // 狙うものがいないときと、速く旋回している間は撃たない
             }
             const Vec2 origin = world.GetCore().pos;
             // ほんの少しばらけて飛ぶ（収束を付けるほど小さくなる）
@@ -189,8 +235,9 @@ namespace {
         }
 
     private:
-        // 狙う方向を求める。狙うものがいなければ false
-        bool DesiredAngle(const World& world, float& angle) const {
+        // 狙う方向を求める。狙うものがいなければ false。
+        // tracked には狙っている相手を入れる（攻撃型のように特定の相手を狙わないときは None のまま）
+        bool DesiredAngle(World& world, float& angle, Target& tracked) {
             const Vec2 origin = world.GetCore().pos;
             switch (Kind().variant) {
             case WeaponVariant::RapidBarrage:
@@ -199,34 +246,42 @@ namespace {
                 Vec2 center;
                 const bool crowd = Kind().variant == WeaponVariant::RapidAttack && world.FindCrowdCenter(center);
                 if (!crowd) {
-                    const Target target = (Kind().variant == WeaponVariant::RapidBarrage) ? world.FindNearestAny(origin, NoRange)
+                    const Target target = (Kind().variant == WeaponVariant::RapidBarrage) ? lock_.Get(world, origin, NoRange, false)
                                                                                            : world.FindNearestTarget(origin);
                     if (target.kind == TargetKind::None) return false;
                     center = target.pos;
+                    tracked = target;
                 }
                 angle = AngleOf(center - origin) + sweepPhase_ * DegreesToRadians(Config::RapidSweepDegrees);
                 return true;
             }
             case WeaponVariant::RapidClose: {
-                // 近接防御型：敵本体と敵の弾を区別せずに、射程内で最も近いものを先読みで狙う
-                const Target target = world.FindNearestAny(origin, Config::RapidCloseRange);
+                // 近接防御型：敵本体と敵の弾を区別せずに、射程内の近い順3つからロックオンし、先読みで狙う
+                const Target target = lock_.Get(world, origin, Config::RapidCloseRange, false);
                 if (target.kind == TargetKind::None) return false;
+                tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
                 return true;
             }
             default: {
-                // 基本型：敵本体と敵の弾を区別せずに、最も近いものを先読みで狙う
-                const Target target = world.FindNearestAny(origin, NoRange);
+                // 基本型：敵本体と敵の弾を区別せずに、近い順3つからロックオンし、先読みで狙う
+                const Target target = lock_.Get(world, origin, NoRange, false);
                 if (target.kind == TargetKind::None) return false;
+                tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
                 return true;
             }
             }
         }
 
+        LockOn lock_;
         float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
         bool hasTarget_ = false;     // 今、狙うものがいるか
         bool engaged_ = false;       // 近接防御型：撃ち続けているか
+        TargetKind trackedKind_ = TargetKind::None;  // 前の回に狙っていた相手
+        int trackedId_ = 0;
+        bool lostTarget_ = false;    // 狙っていた相手がいなくなった（次の相手を狙うときに旋回の仕方を決める）
+        bool fastTurning_ = false;   // 撃つのをやめて速く旋回している
         float sweepPhase_ = 0.0f;
         float sweepDir_ = 1.0f;
         int mountIndex_ = 0;  // 次に撃つ砲
@@ -247,8 +302,16 @@ namespace {
             Vec2 aim;
             const bool crowd = Kind().variant == WeaponVariant::BeamAttack && world.FindCrowdCenter(aim);
             if (!crowd) {
-                const Target target = (Kind().variant == WeaponVariant::BeamDecisive) ? world.FindHighestHpTarget(origin)
-                                                                                         : world.FindNearestTarget(origin);
+                // 決戦型はHPが最も高い敵、攻撃型（敵本体がいないとき）は最も近いもの、
+                // 基本型は敵本体の近い順3体（本体がいなければ敵の弾）からロックオンする
+                Target target;
+                if (Kind().variant == WeaponVariant::BeamDecisive) {
+                    target = world.FindHighestHpTarget(origin);
+                } else if (Kind().variant == WeaponVariant::BeamBasic) {
+                    target = lock_.Get(world, origin, NoRange, true);
+                } else {
+                    target = world.FindNearestTarget(origin);
+                }
                 if (target.kind == TargetKind::None) return false;
                 aim = LeadTarget(origin, target.pos, target.vel, Config::BeamSpeed);
             }
@@ -267,6 +330,9 @@ namespace {
             }
             return true;
         }
+
+    private:
+        LockOn lock_;  // ロックオンしている相手
     };
 
     // 誘導兵器。基本型は最も近い敵、攻撃型は敵が多い場所（爆発が大きい）を追いかける。
@@ -288,11 +354,12 @@ namespace {
                 target = world.FindCrowdCenter(center) ? world.FindNearestTarget(center) : world.FindNearestTarget(origin);
                 break;
             case WeaponVariant::MissileClose:
-                target = world.FindNearestAny(origin, Config::MissileCloseRange);
+                // 近接防御型：近くの近い順3つ（敵本体と敵の弾を区別しない）からロックオンする
+                target = lock_.Get(world, origin, Config::MissileCloseRange, false);
                 break;
             default:
-                // 基本型：敵本体と敵の弾を区別せずに、最も近いものを狙う
-                target = world.FindNearestAny(origin, NoRange);
+                // 基本型：敵本体と敵の弾を区別せずに、近い順3つからロックオンする
+                target = lock_.Get(world, origin, NoRange, false);
                 break;
             }
             if (target.kind == TargetKind::None) {
@@ -320,6 +387,9 @@ namespace {
             }
             return true;
         }
+
+    private:
+        LockOn lock_;  // ロックオンしている相手
     };
 
     // 炸裂弾。基本型は敵が多い場所の、中心の少し手前で炸裂させる。決戦型はHPが最も高い敵に直撃させる

@@ -205,6 +205,11 @@ public:
     Target FindNearestAny(const Vec2& from, float maxRange) const;
     // HPが最も高い敵本体を探す（敵本体がいなければ、from に最も近い敵の弾）
     Target FindHighestHpTarget(const Vec2& from) const;
+    // from に近い順に、最大 count 個の相手を並べる（maxRange より遠いものは除く）。
+    // bodiesFirst なら敵本体だけを並べ、本体がいないときだけ敵の弾を並べる。そうでなければ本体と弾を区別しない
+    std::vector<Target> FindNearestCandidates(const Vec2& from, float maxRange, bool bodiesFirst, size_t count) const;
+    // 近い順に3番目までの中から、ランダムに1つ選ぶ（ロックオンする相手を決める）
+    Target PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst);
     // 番号で相手を探す（もういなければ kind が None になる）
     Target FindTargetById(TargetKind kind, int id) const;
     // 敵が多い場所の中心（敵本体がいなければ false）

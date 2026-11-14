@@ -30,7 +30,10 @@ namespace Config {
     constexpr float RapidGunDamage = 1.0f;
     constexpr float RapidGunSpreadDegrees = 2.0f; // 狙いからずれる最大の角度（度）
     constexpr float RapidTurnDegrees = 360.0f;    // 砲が1秒間に旋回できる角度（度）
-    constexpr float RapidTurretLength = 12.0f;    // コアの上に描く砲身の長さ（コアのふちから）
+    // 狙っていた相手がいなくなり、次の相手との角度の差がこれより大きいときは、撃つのをやめて速く旋回する
+    constexpr float RapidRetargetDegrees = 45.0f;
+    constexpr float RapidFastTurnDegrees = 720.0f; // そのときの旋回の速さ（度/秒）
+    constexpr float RapidResumeDegrees = 10.0f;    // 角度の差がこれ以内になったら、撃つのを再開してふだんの旋回に戻る
     constexpr float PlayerBulletRadius = 3.0f;
     constexpr int RapidGunEnergy = 1;
 
@@ -101,6 +104,9 @@ namespace Config {
     constexpr float MissileVolleyGap = 0.08f;        // 誘導兵器：一斉射で1門ずつずらす時間（秒）
     constexpr float ShellVolleyGap = 0.1f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）
     constexpr float ShellFanDegrees = 8.0f;          // 炸裂弾：扇形で1門ごとに向きを変える角度
+
+    // ロックオン：「最も近い敵」を狙う武装は、近い順にこの数までの中からランダムに選んでロックオンする
+    constexpr size_t LockOnCandidates = 3;
 
     // 開始時のエネルギー上限
     constexpr int StartEnergy = 3;
