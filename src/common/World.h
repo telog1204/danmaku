@@ -81,7 +81,7 @@ enum class PickupKind {
 
 struct Pickup {
     PickupKind kind = PickupKind::Energy;
-    WeaponKind weapon = WeaponKind::RapidGun;      // 武装のとき
+    WeaponKind weapon;                             // 武装のとき
     WeaponFamily family = WeaponFamily::RapidGun;  // 武装・強化パーツの系統
     PartKind part = PartKind::Power;               // 強化パーツのとき
     Vec2 pos;
@@ -198,6 +198,10 @@ public:
 
     // 狙う相手を探す。敵本体を優先して from に最も近いものを選び、本体がいないときだけ最も近い敵の弾を選ぶ
     Target FindNearestTarget(const Vec2& from) const;
+    // 敵本体と敵の弾を区別せずに、from から maxRange 以内で最も近いものを探す（近接防御型）
+    Target FindNearestAny(const Vec2& from, float maxRange) const;
+    // HPが最も高い敵本体を探す（敵本体がいなければ、from に最も近い敵の弾）
+    Target FindHighestHpTarget(const Vec2& from) const;
     // 番号で相手を探す（もういなければ kind が None になる）
     Target FindTargetById(TargetKind kind, int id) const;
     // 敵が多い場所の中心（敵本体がいなければ false）
@@ -220,6 +224,8 @@ private:
     void MovePickups(float dt);
     void AgeMessages(float dt);
     void DropItems(const Enemy& e);
+    std::vector<WeaponKind> WeaponCandidates() const;  // 落ちる候補になる武装（すべての単装＋持っている武装の1つ上の連装）
+    bool Owns(const WeaponKind& kind) const;
     void MakeRewardChoices();
     void PlaceAtScreenEdge(Enemy& e);
     void AddMessage(const std::string& text, PickupKind kind);

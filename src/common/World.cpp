@@ -44,9 +44,19 @@ namespace {
         return a;
     }
 
-    // 開始時に、速射砲に加えて持つ武装の候補（エネルギー上限以下のもの）
-    const WeaponKind StartWeaponChoices[] = { WeaponKind::Beam, WeaponKind::Missile, WeaponKind::Shell };
-    constexpr int StartWeaponChoiceCount = 3;
+    const WeaponKind RapidBasicKind{ WeaponVariant::RapidBasic, 1 };
+
+    // 開始時に、速射砲の基本型に加えて持つ武装の候補（エネルギー上限以下の単装。速射砲の基本型は除く）
+    std::vector<WeaponKind> StartWeaponChoices() {
+        std::vector<WeaponKind> choices;
+        for (int v = 0; v < WeaponVariantCount; ++v) {
+            const WeaponKind kind{ static_cast<WeaponVariant>(v), 1 };
+            if (kind != RapidBasicKind && WeaponEnergy(kind) <= Config::StartEnergy) {
+                choices.push_back(kind);
+            }
+        }
+        return choices;
+    }
 }
 
 Vec2 Beam::Tail() const {
@@ -67,8 +77,9 @@ void World::Reset() {
     // 開始時は、速射砲に加えてランダムに選んだ武装を1つ持つ。
     // 最初はエネルギー上限に収まるように自動で積む（ランダムな武装を1つ、残ったエネルギーで速射砲を積めるだけ）
     weapons_.clear();
-    const WeaponKind start = StartWeaponChoices[std::uniform_int_distribution<int>(0, StartWeaponChoiceCount - 1)(rng_)];
-    ownedWeapons_ = { WeaponKind::RapidGun, start };
+    const std::vector<WeaponKind> choices = StartWeaponChoices();
+    const WeaponKind start = choices[std::uniform_int_distribution<size_t>(0, choices.size() - 1)(rng_)];
+    ownedWeapons_ = { RapidBasicKind, start };
     for (auto& row : spareParts_) {
         for (int& n : row) n = 0;
     }
@@ -78,10 +89,10 @@ void World::Reset() {
     weapons_.push_back(CreateWeapon(start, 0.0f));
     int energyLeft = Config::StartEnergy - WeaponEnergy(start);
     int rapidCount = 0;
-    while (energyLeft >= WeaponEnergy(WeaponKind::RapidGun)) {
+    while (energyLeft >= WeaponEnergy(RapidBasicKind)) {
         // 撃つタイミングが重ならないように、少しずつずらす
-        weapons_.push_back(CreateWeapon(WeaponKind::RapidGun, Config::RapidGunInterval * 0.5f * rapidCount));
-        energyLeft -= WeaponEnergy(WeaponKind::RapidGun);
+        weapons_.push_back(CreateWeapon(RapidBasicKind, Config::RapidGunInterval * 0.5f * rapidCount));
+        energyLeft -= WeaponEnergy(RapidBasicKind);
         ++rapidCount;
     }
 
@@ -175,9 +186,9 @@ void World::Collect(const Pickup& pickup) {
         break;
     }
     case PickupKind::Weapon:
-        if (std::find(ownedWeapons_.begin(), ownedWeapons_.end(), pickup.weapon) == ownedWeapons_.end()) {
+        if (!Owns(pickup.weapon)) {
             ownedWeapons_.push_back(pickup.weapon);
-            AddMessage(std::string(WeaponName(pickup.weapon)) + " を手に入れた", pickup.kind);
+            AddMessage(WeaponName(pickup.weapon) + " を手に入れた", pickup.kind);
         } else {
             // 同じ武装を続けて拾ったときは、その系統の強化パーツにする
             Pickup part = pickup;
@@ -242,6 +253,51 @@ Target World::FindNearestTarget(const Vec2& from) const {
         }
     }
     return best;
+}
+
+Target World::FindNearestAny(const Vec2& from, float maxRange) const {
+    Target best;
+    float bestDistSq = maxRange * maxRange;
+    for (const Enemy& e : enemies_) {
+        const float d = (e.pos - from).LengthSq();
+        if (e.alive && d <= bestDistSq) {
+            best.kind = TargetKind::Enemy;
+            best.id = e.id;
+            best.pos = e.pos;
+            best.vel = e.vel;
+            bestDistSq = d;
+        }
+    }
+    for (const Bullet& b : enemyBullets_) {
+        const float d = (b.pos - from).LengthSq();
+        if (b.alive && d <= bestDistSq) {
+            best.kind = TargetKind::EnemyBullet;
+            best.id = b.id;
+            best.pos = b.pos;
+            best.vel = b.vel;
+            bestDistSq = d;
+        }
+    }
+    return best;
+}
+
+Target World::FindHighestHpTarget(const Vec2& from) const {
+    Target best;
+    float bestHp = 0.0f;
+    for (const Enemy& e : enemies_) {
+        if (e.alive && (best.kind == TargetKind::None || e.hp > bestHp)) {
+            best.kind = TargetKind::Enemy;
+            best.id = e.id;
+            best.pos = e.pos;
+            best.vel = e.vel;
+            bestHp = e.hp;
+        }
+    }
+    if (best.kind != TargetKind::None) {
+        return best;
+    }
+    // 敵の弾はどれもHP1なので、最も近いものを選ぶ
+    return FindNearestTarget(from);
 }
 
 Target World::FindTargetById(TargetKind kind, int id) const {
@@ -450,9 +506,8 @@ void World::MakeRewardChoices() {
     // 残りは、持っている武装の系統の強化パーツと、エネルギー上限解放パーツから選ぶ（同じものは並べない）
     rewardChoices_.clear();
     std::vector<WeaponKind> unowned;
-    for (int k = 0; k < WeaponKindCount; ++k) {
-        const WeaponKind kind = static_cast<WeaponKind>(k);
-        if (std::find(ownedWeapons_.begin(), ownedWeapons_.end(), kind) == ownedWeapons_.end()) {
+    for (const WeaponKind& kind : WeaponCandidates()) {
+        if (!Owns(kind)) {
             unowned.push_back(kind);
         }
     }
@@ -617,9 +672,10 @@ void World::DropItems(const Enemy& e) {
         return;
     }
     Pickup p;
-    p.weapon = static_cast<WeaponKind>(std::uniform_int_distribution<int>(0, WeaponKindCount - 1)(rng_));
+    const std::vector<WeaponKind> candidates = WeaponCandidates();
+    p.weapon = candidates[std::uniform_int_distribution<size_t>(0, candidates.size() - 1)(rng_)];
     p.family = FamilyOf(p.weapon);
-    if (std::find(ownedWeapons_.begin(), ownedWeapons_.end(), p.weapon) == ownedWeapons_.end()) {
+    if (!Owns(p.weapon)) {
         p.kind = PickupKind::Weapon;
     } else {
         p.kind = PickupKind::Part;
@@ -629,6 +685,25 @@ void World::DropItems(const Enemy& e) {
     p.pos = e.pos + Vec2(RandomRange(-8.0f, 8.0f), RandomRange(-8.0f, 8.0f));
     p.speed = Config::PickupStartSpeed;
     pickups_.push_back(p);
+}
+
+bool World::Owns(const WeaponKind& kind) const {
+    return std::find(ownedWeapons_.begin(), ownedWeapons_.end(), kind) != ownedWeapons_.end();
+}
+
+std::vector<WeaponKind> World::WeaponCandidates() const {
+    // すべての単装に、持っている武装の1つ上の連装段階を加える（連装型は順番にしか手に入らない）
+    std::vector<WeaponKind> candidates;
+    for (int v = 0; v < WeaponVariantCount; ++v) {
+        candidates.push_back(WeaponKind{ static_cast<WeaponVariant>(v), 1 });
+    }
+    for (const WeaponKind& owned : ownedWeapons_) {
+        const WeaponKind next = NextBarrelStep(owned);
+        if (next.barrels > 0 && std::find(candidates.begin(), candidates.end(), next) == candidates.end()) {
+            candidates.push_back(next);
+        }
+    }
+    return candidates;
 }
 
 void World::DamageEnemy(Enemy& e, float damage) {

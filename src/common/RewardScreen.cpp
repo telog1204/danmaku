@@ -108,7 +108,7 @@ void RewardScreen::Draw(const World& world) const {
             border = GetColor(127, 208, 255);
             kindLabel = "武装";
             name = WeaponName(p.weapon);
-            desc = std::string(WeaponDescription(p.weapon)) + "（エネルギー " + std::to_string(WeaponEnergy(p.weapon)) + "）";
+            desc = WeaponDescription(p.weapon) + "（エネルギー " + std::to_string(WeaponEnergy(p.weapon)) + "）";
             break;
         case PickupKind::Part:
             fill = GetColor(46, 36, 64);
