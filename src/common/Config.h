@@ -147,6 +147,20 @@ namespace Config {
     constexpr float EvaderReactionMax = 0.35f;
     constexpr float EvaderMissChance = 0.3f;        // 見直したときに、弾を見落とす確率
 
+    // 強敵（ボス）：重装型を大きく強くした形。コアの周りを旋回しながら、扇形に弾をばらまく
+    constexpr float BossInterval = 60.0f;         // 強敵がいない時間がこれだけ続くと現れる（秒）
+    constexpr float BossWarningSeconds = 3.0f;    // 現れる何秒前から「強敵接近」と知らせるか
+    constexpr float BossHp = 150.0f;              // 元のHP（普通の敵と同じ割合で、時間とともに増える）
+    constexpr float BossSpeed = 40.0f;
+    constexpr float BossTurnDegrees = 30.0f;
+    constexpr float BossRadius = 30.0f;
+    constexpr float BossKeepDistance = 250.0f;
+    constexpr float BossShotInterval = 1.5f;
+    constexpr int BossShotCount = 5;              // 1回に扇形に撃つ弾の数
+    constexpr float BossShotSpreadDegrees = 12.0f; // 扇形の弾どうしの間の角度
+    constexpr int BossRamDamage = 30;
+    constexpr float BossRamCooldown = 1.0f;       // 体当たりのあと、次に体当たりのダメージを与えるまでの時間
+
     // ゲームオーバーのあと、やり直しの操作を受け付けるまでの時間（秒）
     constexpr float RestartDelay = 0.5f;
 }

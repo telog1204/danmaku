@@ -20,6 +20,14 @@ void Game::Update(double dtSeconds) {
         return;
     }
 
+    // 報酬を選んでいる間も、ゲームの時間を進めない
+    if (mode_ == Mode::Reward) {
+        if (rewardScreen_.Update(world_, input)) {
+            mode_ = Mode::Battle;
+        }
+        return;
+    }
+
     if (world_.IsGameOver()) {
         // ゲームオーバーのあと少し待ってから、タップ（クリック）で最初からやり直す
         if (world_.GameOverSeconds() >= Config::RestartDelay && pressed) {
@@ -34,11 +42,21 @@ void Game::Update(double dtSeconds) {
     }
 
     world_.Update(dt);
+
+    // 強敵を倒したら、報酬を選ぶ画面を開く
+    if (world_.HasPendingReward()) {
+        rewardScreen_.Open();
+        mode_ = Mode::Reward;
+    }
 }
 
 void Game::Draw() {
     if (mode_ == Mode::Build) {
         buildScreen_.Draw(world_);
+        return;
+    }
+    if (mode_ == Mode::Reward) {
+        rewardScreen_.Draw(world_);
         return;
     }
     DrawWorld(world_);

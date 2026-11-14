@@ -113,6 +113,29 @@ namespace {
         ShootAtCore(e, world, dt, Config::ShooterShotInterval, Config::ShooterKeepDistance + 80.0f);
     }
 
+    // 強敵：コアの周りをゆっくり旋回しながら、コアの方向へ扇形に弾をばらまく
+    void UpdateBoss(Enemy& e, World& world, float dt) {
+        const Vec2 desired = AvoidEdges(e, OrbitDirection(e, world.GetCore().pos, Config::BossKeepDistance));
+        Steer(e, desired, Config::BossTurnDegrees, Config::BossSpeed, dt);
+        if (e.ramCooldown > 0.0f) {
+            e.ramCooldown -= dt;
+        }
+        e.shotTimer -= dt;
+        if (e.shotTimer > 0.0f) {
+            return;
+        }
+        e.shotTimer += Config::BossShotInterval;
+        const Vec2 toCore = world.GetCore().pos - e.pos;
+        const float center = std::atan2(toCore.y, toCore.x);
+        const float step = DegreesToRadians(Config::BossShotSpreadDegrees);
+        for (int i = 0; i < Config::BossShotCount; ++i) {
+            const float angle = center + step * (static_cast<float>(i) - (Config::BossShotCount - 1) * 0.5f);
+            const Vec2 dir = Vec2::FromAngle(angle);
+            world.FireEnemyBullet(e.pos + dir * e.radius, dir * Config::EnemyBulletSpeed,
+                                  Config::EnemyBulletRadius, Config::EnemyBulletDamage);
+        }
+    }
+
     void UpdateEvader(Enemy& e, World& world, float dt) {
         // 弾を見直すのは、ばらつきのある間隔ごと。たまに見落とす
         e.reactionTimer -= dt;
@@ -156,6 +179,9 @@ void UpdateEnemy(Enemy& e, World& world, float dt) {
         break;
     case EnemyType::Evader:
         UpdateEvader(e, world, dt);
+        break;
+    case EnemyType::Boss:
+        UpdateBoss(e, world, dt);
         break;
     }
 

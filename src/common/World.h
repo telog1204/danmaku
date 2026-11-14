@@ -112,6 +112,7 @@ enum class EnemyType {
     Charger,  // 突撃型
     Shooter,  // 射撃型
     Evader,   // 回避型
+    Boss,     // 強敵
 };
 
 struct Enemy {
@@ -130,6 +131,7 @@ struct Enemy {
     float orbitDir = 1.0f;     // コアの周りを回る向き（1：左回り、−1：右回り）
     float reactionTimer = 0.0f; // 回避型：次に弾を見直すまでの時間（秒）
     Vec2 dodgeDir;             // 回避型：当たりそうな弾から離れたい向き（当たりそうな弾がなければ長さ0）
+    float ramCooldown = 0.0f;  // 強敵：次に体当たりのダメージを与えるまでの時間
 };
 
 // 武装が狙う相手
@@ -182,6 +184,14 @@ public:
     // 拾ったものを手に入れる（落とし物を拾ったときに呼ぶ。試験からも使う）
     void Collect(const Pickup& pickup);
 
+    // 強敵
+    const Enemy* FindBoss() const;               // 今いる強敵（いなければ nullptr）
+    bool IsBossWarning() const;                  // もうすぐ強敵が現れる（「強敵接近」を出す）
+    bool HasPendingReward() const { return !rewardChoices_.empty(); }  // 強敵を倒して、報酬を選ぶのを待っている
+    const std::vector<Pickup>& RewardChoices() const { return rewardChoices_; }
+    void ChooseReward(size_t index);             // 報酬を1つ選んで手に入れる
+    void SpawnBoss();                            // 強敵を出す（時間で現れるほか、試験からも使う）
+
     // 武装や敵の動きから使うもの
     std::mt19937& Rng() { return rng_; }
     float RandomRange(float min, float max);
@@ -210,6 +220,8 @@ private:
     void MovePickups(float dt);
     void AgeMessages(float dt);
     void DropItems(const Enemy& e);
+    void MakeRewardChoices();
+    void PlaceAtScreenEdge(Enemy& e);
     void AddMessage(const std::string& text, PickupKind kind);
     void HandleCollisions();
     void DamageEnemy(Enemy& e, float damage);
@@ -240,6 +252,8 @@ private:
     int nextId_ = 1;
     float elapsed_ = 0.0f;
     float spawnTimer_ = 0.0f;
+    float bossTimer_ = 0.0f;  // 次の強敵が現れるまでの時間（強敵がいない間だけ減る）
+    std::vector<Pickup> rewardChoices_;  // 強敵を倒したときの報酬の候補（選ぶまで空でない）
     bool gameOver_ = false;
     float gameOverSeconds_ = 0.0f;  // ゲームオーバーになってからの時間（やり直しの受け付けに使う）
 };

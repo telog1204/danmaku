@@ -95,6 +95,8 @@ void World::Reset() {
     pendingExplosions_.clear();
     pickups_.clear();
     messages_.clear();
+    rewardChoices_.clear();
+    bossTimer_ = Config::BossInterval;
     nextId_ = 1;
     elapsed_ = 0.0f;
     spawnTimer_ = 0.0f;
@@ -308,7 +310,8 @@ void World::Update(float dtSeconds) {
     // 速い弾が敵をすり抜けないように、細かく分けて進める
     const int steps = std::max(1, static_cast<int>(std::ceil(dtSeconds / Config::StepSeconds)));
     const float dt = dtSeconds / steps;
-    for (int i = 0; i < steps && !gameOver_; ++i) {
+    // 強敵を倒して報酬を選ぶ間は、時間を止める
+    for (int i = 0; i < steps && !gameOver_ && !HasPendingReward(); ++i) {
         Step(dt);
     }
 }
@@ -321,6 +324,14 @@ void World::Step(float dt) {
         SpawnEnemy();
         spawnTimer_ = std::max(Config::SpawnIntervalMin,
                                Config::SpawnIntervalStart - elapsed_ * Config::SpawnIntervalShrinkPerSecond);
+    }
+
+    // 強敵は、強敵がいない時間が一定続くと現れる（1体いる間は次は現れない）
+    if (FindBoss() == nullptr) {
+        bossTimer_ -= dt;
+        if (bossTimer_ <= 0.0f) {
+            SpawnBoss();
+        }
     }
 
     for (auto& w : weapons_) {
@@ -380,6 +391,25 @@ void World::SpawnEnemy() {
     // 時間が経つほどHPが増える
     e.maxHp = baseHp * (1.0f + elapsed_ / Config::EnemyHpGrowthSeconds);
     e.hp = e.maxHp;
+    PlaceAtScreenEdge(e);
+    enemies_.push_back(e);
+}
+
+void World::SpawnBoss() {
+    Enemy e;
+    e.id = nextId_++;
+    e.type = EnemyType::Boss;
+    e.radius = Config::BossRadius;
+    e.speed = Config::BossSpeed;
+    e.maxHp = Config::BossHp * (1.0f + elapsed_ / Config::EnemyHpGrowthSeconds);
+    e.hp = e.maxHp;
+    e.shotTimer = Config::BossShotInterval;
+    PlaceAtScreenEdge(e);
+    enemies_.push_back(e);
+    bossTimer_ = Config::BossInterval;
+}
+
+void World::PlaceAtScreenEdge(Enemy& e) {
     e.orbitDir = (std::uniform_int_distribution<int>(0, 1)(rng_) == 0) ? 1.0f : -1.0f;
 
     // 画面の四辺のどこかの、少し外側に置く
@@ -400,7 +430,69 @@ void World::SpawnEnemy() {
     const Vec2 toCore = core_.pos - e.pos;
     e.heading = std::atan2(toCore.y, toCore.x);
     e.vel = Vec2::FromAngle(e.heading) * e.speed;
-    enemies_.push_back(e);
+}
+
+const Enemy* World::FindBoss() const {
+    for (const Enemy& e : enemies_) {
+        if (e.alive && e.type == EnemyType::Boss) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
+bool World::IsBossWarning() const {
+    return FindBoss() == nullptr && bossTimer_ <= Config::BossWarningSeconds;
+}
+
+void World::MakeRewardChoices() {
+    // 候補の出方：まだ持っていない武装があれば1つは必ず武装。
+    // 残りは、持っている武装の系統の強化パーツと、エネルギー上限解放パーツから選ぶ（同じものは並べない）
+    rewardChoices_.clear();
+    std::vector<WeaponKind> unowned;
+    for (int k = 0; k < WeaponKindCount; ++k) {
+        const WeaponKind kind = static_cast<WeaponKind>(k);
+        if (std::find(ownedWeapons_.begin(), ownedWeapons_.end(), kind) == ownedWeapons_.end()) {
+            unowned.push_back(kind);
+        }
+    }
+    if (!unowned.empty()) {
+        Pickup p;
+        p.kind = PickupKind::Weapon;
+        p.weapon = unowned[std::uniform_int_distribution<size_t>(0, unowned.size() - 1)(rng_)];
+        p.family = FamilyOf(p.weapon);
+        rewardChoices_.push_back(p);
+    }
+    std::vector<Pickup> pool;
+    Pickup energy;
+    energy.kind = PickupKind::Energy;
+    pool.push_back(energy);
+    std::vector<WeaponFamily> families;
+    for (WeaponKind kind : ownedWeapons_) {
+        const WeaponFamily family = FamilyOf(kind);
+        if (std::find(families.begin(), families.end(), family) != families.end()) continue;
+        families.push_back(family);
+        for (PartKind part : FamilyParts(family)) {
+            Pickup p;
+            p.kind = PickupKind::Part;
+            p.family = family;
+            p.part = part;
+            pool.push_back(p);
+        }
+    }
+    std::shuffle(pool.begin(), pool.end(), rng_);
+    for (size_t i = 0; i < pool.size() && rewardChoices_.size() < 3; ++i) {
+        rewardChoices_.push_back(pool[i]);
+    }
+}
+
+void World::ChooseReward(size_t index) {
+    if (index >= rewardChoices_.size()) {
+        return;
+    }
+    const Pickup chosen = rewardChoices_[index];
+    rewardChoices_.clear();
+    Collect(chosen);
 }
 
 void World::MoveBullets(std::vector<Bullet>& bullets, float dt) {
@@ -546,7 +638,12 @@ void World::DamageEnemy(Enemy& e, float damage) {
     e.hp -= damage;
     if (e.hp <= 0.0f) {
         e.alive = false;
-        DropItems(e);
+        if (e.type == EnemyType::Boss) {
+            // 強敵は落とし物を落とさず、代わりに報酬を選べる
+            MakeRewardChoices();
+        } else {
+            DropItems(e);
+        }
     }
 }
 
@@ -717,11 +814,18 @@ void World::HandleCollisions() {
         }
     }
 
-    // 敵本体がコアにぶつかる（体当たり）。ぶつかった敵は消える
+    // 敵本体がコアにぶつかる（体当たり）。ぶつかった敵は消える。強敵は消えず、少し間をおいて何度でもダメージを与える
     for (Enemy& e : enemies_) {
         if (e.alive && Overlaps(e.pos, e.radius, core_.pos, core_.radius)) {
-            e.alive = false;
-            core_.hp -= Config::ChargerRamDamage;
+            if (e.type == EnemyType::Boss) {
+                if (e.ramCooldown <= 0.0f) {
+                    core_.hp -= Config::BossRamDamage;
+                    e.ramCooldown = Config::BossRamCooldown;
+                }
+            } else {
+                e.alive = false;
+                core_.hp -= Config::ChargerRamDamage;
+            }
         }
     }
 }

@@ -44,6 +44,7 @@ const char* PartDescription(WeaponFamily family, PartKind part);
 
 // 武装の名前（画面に出す）と、本体が使うエネルギー
 const char* WeaponName(WeaponKind kind);
+const char* WeaponDescription(WeaponKind kind);
 int WeaponEnergy(WeaponKind kind);
 
 // 武装に共通する形。コアが積んだ武装を順に Update し、撃つ時間になったら World に弾を出す
