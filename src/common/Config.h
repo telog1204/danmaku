@@ -43,9 +43,9 @@ namespace Config {
 
     // 誘導兵器（基本型）。撃ち出して一瞬まっすぐ進んでから追いかける。何かに当たると小さな爆発を起こす
     constexpr float MissileInterval = 0.8f;
-    constexpr float MissileSpeed = 300.0f;
+    constexpr float MissileSpeed = 600.0f;
     constexpr float MissileDamage = 3.0f;
-    constexpr float MissileTurnDegrees = 240.0f;  // 1秒間に曲がれる角度（度）
+    constexpr float MissileTurnDegrees = 360.0f;  // 1秒間に曲がれる角度（度）
     constexpr float MissileStraightSeconds = 0.15f; // 撃ち出してからまっすぐ進む時間
     constexpr float MissileRadius = 4.0f;
     constexpr float MissileLifeSeconds = 4.0f;    // これより長く飛んだら消える
