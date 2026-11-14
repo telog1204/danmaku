@@ -156,6 +156,8 @@ public:
     bool IsGameOver() const { return gameOver_; }
     float ElapsedSeconds() const { return elapsed_; }
     float GameOverSeconds() const { return gameOverSeconds_; }
+    int Kills() const { return kills_; }          // 倒した敵の数（強敵と、体当たりで消えた敵は含めない）
+    int BossKills() const { return bossKills_; }  // 倒した強敵の数
 
     const Core& GetCore() const { return core_; }
     const std::vector<Enemy>& Enemies() const { return enemies_; }
@@ -258,7 +260,9 @@ private:
     int nextId_ = 1;
     float elapsed_ = 0.0f;
     float spawnTimer_ = 0.0f;
-    float bossTimer_ = 0.0f;  // 次の強敵が現れるまでの時間（強敵がいない間だけ減る）
+    float bossTimer_ = 0.0f;
+    int kills_ = 0;
+    int bossKills_ = 0;  // 次の強敵が現れるまでの時間（強敵がいない間だけ減る）
     std::vector<Pickup> rewardChoices_;  // 強敵を倒したときの報酬の候補（選ぶまで空でない）
     bool gameOver_ = false;
     float gameOverSeconds_ = 0.0f;  // ゲームオーバーになってからの時間（やり直しの受け付けに使う）

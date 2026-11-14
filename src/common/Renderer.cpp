@@ -184,24 +184,6 @@ namespace {
         DrawCircle(Px(x.pos.x), Px(x.pos.y), Px(x.radius * 0.5f), GetColor(bright, bright * 3 / 5, bright / 4), TRUE);
     }
 
-    void DrawCentered(int y, unsigned int color, const char* text) {
-        const int w = GetDrawStringWidth(text, static_cast<int>(std::strlen(text)));
-        DrawString((Config::ScreenWidth - w) / 2, y, text, color);
-    }
-
-    void DrawGameOver(const World& world) {
-        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 160);
-        DrawBox(0, 0, Config::ScreenWidth, Config::ScreenHeight, GetColor(0, 0, 0), TRUE);
-        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-        const int cy = Config::ScreenHeight / 2;
-        DrawCentered(cy - 30, GetColor(255, 80, 80), "GAME OVER");
-        char line[64];
-        std::snprintf(line, sizeof(line), "TIME %.1f", world.ElapsedSeconds());
-        DrawCentered(cy, GetColor(255, 255, 255), line);
-        if (world.GameOverSeconds() >= Config::RestartDelay) {
-            DrawCentered(cy + 30, GetColor(200, 200, 200), "タップ（クリック）でやり直し");
-        }
-    }
 }
 
 void DrawWorld(const World& world) {
@@ -239,7 +221,4 @@ void DrawWorld(const World& world) {
     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
     DrawHud(world);
-    if (world.IsGameOver()) {
-        DrawGameOver(world);
-    }
 }

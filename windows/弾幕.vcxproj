@@ -160,6 +160,9 @@
     <ClCompile Include="..\src\common\Renderer.cpp" />
     <ClCompile Include="..\src\common\BuildScreen.cpp" />
     <ClCompile Include="..\src\common\RewardScreen.cpp" />
+    <ClCompile Include="..\src\common\Records.cpp" />
+    <ClCompile Include="..\src\common\TitleScreen.cpp" />
+    <ClCompile Include="..\src\common\GameOverScreen.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\common\pch.h" />
@@ -174,6 +177,9 @@
     <ClInclude Include="..\src\common\Renderer.h" />
     <ClInclude Include="..\src\common\BuildScreen.h" />
     <ClInclude Include="..\src\common\RewardScreen.h" />
+    <ClInclude Include="..\src\common\Records.h" />
+    <ClInclude Include="..\src\common\TitleScreen.h" />
+    <ClInclude Include="..\src\common\GameOverScreen.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
