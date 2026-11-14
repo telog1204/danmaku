@@ -40,7 +40,7 @@ namespace Config {
     // ビーム砲（基本型）。敵を貫き、貫くたびに威力が下がる。長い尾を含めた線全体に当たり判定がある
     constexpr float BeamInterval = 0.3f;
     constexpr float BeamSpeed = 1200.0f;
-    constexpr float BeamDamage = 3.0f;
+    constexpr float BeamDamage = 6.0f;
     constexpr float BeamDecay = 0.7f;             // 1つ貫くごとに、威力がこの割合になる
     constexpr float BeamTailLength = 80.0f;
     constexpr float BeamHalfWidth = 2.0f;         // 当たり判定の太さの半分
@@ -51,7 +51,9 @@ namespace Config {
     constexpr float MissileSpeed = 600.0f;
     constexpr float MissileDamage = 3.0f;
     constexpr float MissileTurnDegrees = 360.0f;  // 1秒間に曲がれる角度（度）
-    constexpr float MissileStraightSeconds = 0.15f; // 撃ち出してからまっすぐ進む時間
+    constexpr float MissileStraightSeconds = 0.15f; // 撃ち出してからまっすぐ進む時間（近接防御型はまっすぐ進まない）
+    constexpr float MissileViewDegrees = 120.0f;  // 誘導弾が見える前方の範囲（度。左右に半分ずつ）。後ろ側は見えない
+    constexpr int MissileTargetCap = 3;           // 同じ種類の武装から出た誘導弾が、同じ相手を狙える数
     constexpr float MissileRadius = 4.0f;
     constexpr float MissileLifeSeconds = 4.0f;    // これより長く飛んだら消える
     constexpr float MissileExplosionRadius = 25.0f;
@@ -101,7 +103,7 @@ namespace Config {
     constexpr float RapidBarrelSpacing = 8.0f;       // 速射砲：並べた砲の間隔（ドット）
     constexpr float BeamBarrelSpacing = 10.0f;       // ビーム砲：並べた砲の間隔（ドット）
     constexpr float BeamVolleyGap = 0.05f;           // ビーム砲：一斉射で1門ずつずらす時間（秒）
-    constexpr float MissileVolleyGap = 0.08f;        // 誘導兵器：一斉射で1門ずつずらす時間（秒）
+    constexpr float MissileVolleyGap = 0.15f;        // 誘導兵器：一斉射で1門ずつずらす時間（秒）
     constexpr float ShellVolleyGap = 0.1f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）
     constexpr float ShellFanDegrees = 8.0f;          // 炸裂弾：扇形で1門ごとに向きを変える角度
 

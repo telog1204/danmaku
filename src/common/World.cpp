@@ -80,6 +80,7 @@ void World::Reset() {
     const std::vector<WeaponKind> choices = StartWeaponChoices();
     const WeaponKind start = choices[std::uniform_int_distribution<size_t>(0, choices.size() - 1)(rng_)];
     ownedWeapons_ = { RapidBasicKind, start };
+    SortOwnedWeapons();
     for (auto& row : spareParts_) {
         for (int& n : row) n = 0;
     }
@@ -190,6 +191,7 @@ void World::Collect(const Pickup& pickup) {
     case PickupKind::Weapon:
         if (!Owns(pickup.weapon)) {
             ownedWeapons_.push_back(pickup.weapon);
+            SortOwnedWeapons();
             AddMessage(WeaponName(pickup.weapon) + " を手に入れた", pickup.kind);
         } else {
             // 同じ武装を続けて拾ったときは、その系統の強化パーツにする
@@ -283,7 +285,8 @@ Target World::FindNearestAny(const Vec2& from, float maxRange) const {
     return best;
 }
 
-std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRange, bool bodiesFirst, size_t count) const {
+std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRange, bool bodiesFirst, size_t count,
+                                                 const std::function<bool(const Target&)>& accept) const {
     std::vector<std::pair<float, Target>> found;
     const float rangeSq = maxRange * maxRange;
     for (const Enemy& e : enemies_) {
@@ -294,7 +297,9 @@ std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRang
             t.id = e.id;
             t.pos = e.pos;
             t.vel = e.vel;
-            found.emplace_back(d, t);
+            if (!accept || accept(t)) {
+                found.emplace_back(d, t);
+            }
         }
     }
     if (!bodiesFirst || found.empty()) {
@@ -306,7 +311,9 @@ std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRang
                 t.id = b.id;
                 t.pos = b.pos;
                 t.vel = b.vel;
-                found.emplace_back(d, t);
+                if (!accept || accept(t)) {
+                    found.emplace_back(d, t);
+                }
             }
         }
     }
@@ -320,24 +327,58 @@ std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRang
     return result;
 }
 
-Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst) {
-    const std::vector<Target> candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates);
+namespace {
+    bool Contains(const std::vector<Target>& list, const Target& t) {
+        for (const Target& x : list) {
+            if (x.SameAs(t)) return true;
+        }
+        return false;
+    }
+}
+
+Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude) {
+    std::vector<Target> candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates,
+                                                           [&exclude](const Target& t) { return !Contains(exclude, t); });
+    if (candidates.empty()) {
+        // 外すと候補がなくなるときは、ほかの武装と重なっても狙う
+        candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates);
+    }
     if (candidates.empty()) {
         return Target();
     }
     return candidates[std::uniform_int_distribution<size_t>(0, candidates.size() - 1)(rng_)];
 }
 
-Target World::FindHighestHpTarget(const Vec2& from) const {
+std::vector<Target> World::TargetsOfSameKind(const Weapon* self) const {
+    std::vector<Target> targets;
+    for (const auto& w : weapons_) {
+        if (w.get() == self || w->Kind() != self->Kind()) continue;
+        const Target t = w->CurrentTarget();
+        if (t.kind != TargetKind::None) {
+            targets.push_back(t);
+        }
+    }
+    return targets;
+}
+
+Target World::FindHighestHpTarget(const Vec2& from, const std::vector<Target>& exclude) const {
     Target best;
     float bestHp = 0.0f;
-    for (const Enemy& e : enemies_) {
-        if (e.alive && (best.kind == TargetKind::None || e.hp > bestHp)) {
-            best.kind = TargetKind::Enemy;
-            best.id = e.id;
-            best.pos = e.pos;
-            best.vel = e.vel;
-            bestHp = e.hp;
+    for (int pass = 0; pass < 2 && best.kind == TargetKind::None; ++pass) {
+        // 1回目は exclude の相手を除いて探し、見つからなければ2回目は除かずに探す
+        for (const Enemy& e : enemies_) {
+            if (!e.alive) continue;
+            Target t;
+            t.kind = TargetKind::Enemy;
+            t.id = e.id;
+            if (pass == 0 && Contains(exclude, t)) continue;
+            if (best.kind == TargetKind::None || e.hp > bestHp) {
+                best.kind = TargetKind::Enemy;
+                best.id = e.id;
+                best.pos = e.pos;
+                best.vel = e.vel;
+                bestHp = e.hp;
+            }
         }
     }
     if (best.kind != TargetKind::None) {
@@ -632,12 +673,15 @@ void World::MoveMissiles(float dt) {
             m.alive = false;
             continue;
         }
-        // 撃ち出してしばらくはまっすぐ進み、そのあと狙った相手を追いかける
-        if (m.age > Config::MissileStraightSeconds) {
+        // 撃ち出してしばらくはまっすぐ進み（近接防御型はすぐに）、そのあと前方に見えている相手を選んで追いかける
+        if (m.age >= m.straightSeconds) {
             Target target = FindTargetById(m.targetKind, m.targetId);
+            if (target.kind != TargetKind::None && !MissileCanSee(m, target.pos)) {
+                target = Target();  // 追い越して後ろ側に回ったら見失う
+            }
             if (target.kind == TargetKind::None) {
-                // 狙った相手がいなくなったら、別の相手を狙い直す（基本型・近接防御型は近い順3つからランダムにロックオン）
-                target = m.targetsBullets ? PickLockOnTarget(m.pos, 1.0e9f, false) : FindNearestTarget(m.pos);
+                // 狙う相手がいない・見失ったときは、前方に見えている相手から選び直す（いなければまっすぐ飛ぶ）
+                target = AcquireMissileTarget(m);
                 m.targetKind = target.kind;
                 m.targetId = target.id;
             }
@@ -671,6 +715,42 @@ void World::AgeExplosions(float dt) {
             x.alive = false;
         }
     }
+}
+
+bool World::MissileCanSee(const Missile& m, const Vec2& pos) const {
+    const Vec2 to = pos - m.pos;
+    if (to.LengthSq() <= 0.0f) return true;
+    const float diff = WrapAngle(std::atan2(to.y, to.x) - m.heading);
+    return std::fabs(diff) <= Config::MissileViewDegrees * 0.5f * Pi / 180.0f;
+}
+
+Target World::AcquireMissileTarget(const Missile& m) {
+    // 前方に見えている相手を近い順に並べる（攻撃型は敵本体を優先）
+    const std::vector<Target> visible = FindNearestCandidates(
+        m.pos, 1.0e9f, m.bodiesFirst, static_cast<size_t>(-1), [this, &m](const Target& t) { return MissileCanSee(m, t.pos); });
+    if (visible.empty()) {
+        return Target();
+    }
+    // 同じ種類の武装から出た誘導弾が、すでに上限の数だけ追いかけている相手は外す（外すと候補がなくなるときは外さない）
+    std::vector<Target> open;
+    for (const Target& t : visible) {
+        int chasing = 0;
+        for (const Missile& o : missiles_) {
+            if (&o != &m && o.alive && o.kind == m.kind && o.targetKind == t.kind && o.targetId == t.id) {
+                ++chasing;
+            }
+        }
+        if (chasing < Config::MissileTargetCap) {
+            open.push_back(t);
+        }
+    }
+    const std::vector<Target>& pool = open.empty() ? visible : open;
+    if (m.bodiesFirst) {
+        return pool.front();  // 攻撃型：最も近いもの
+    }
+    // 基本型・近接防御型：近い順に3番目までの中からランダムに選ぶ
+    const size_t n = std::min(pool.size(), Config::LockOnCandidates);
+    return pool[std::uniform_int_distribution<size_t>(0, n - 1)(rng_)];
 }
 
 void World::MovePickups(float dt) {
@@ -732,6 +812,14 @@ void World::DropItems(const Enemy& e) {
     p.pos = e.pos + Vec2(RandomRange(-8.0f, 8.0f), RandomRange(-8.0f, 8.0f));
     p.speed = Config::PickupStartSpeed;
     pickups_.push_back(p);
+}
+
+void World::SortOwnedWeapons() {
+    // 系統 → 派生版 → 連装の順（派生版の並びは系統ごとにまとまっている）
+    std::sort(ownedWeapons_.begin(), ownedWeapons_.end(), [](const WeaponKind& a, const WeaponKind& b) {
+        if (a.variant != b.variant) return static_cast<int>(a.variant) < static_cast<int>(b.variant);
+        return a.barrels < b.barrels;
+    });
 }
 
 bool World::Owns(const WeaponKind& kind) const {

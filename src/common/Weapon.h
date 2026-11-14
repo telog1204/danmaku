@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "Target.h"
 
 class World;
 
@@ -78,6 +79,9 @@ public:
     virtual ~Weapon() = default;
     const WeaponKind& Kind() const { return kind_; }
     virtual void Update(World& world, float dt) = 0;
+
+    // 今狙っている相手（特定の相手を狙っていなければ kind が None）。同じ種類の武装どうしで狙いを分けるのに使う
+    virtual Target CurrentTarget() const { return Target(); }
 
     // 向きを持って旋回する武装（速射砲）か、と今向いている方向（ラジアン）
     virtual bool HasTurret() const { return false; }

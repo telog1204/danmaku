@@ -52,19 +52,28 @@ namespace {
     }
 
     // ロックオン：近い順に3番目までの中からランダムに1つ選び、その相手が倒れるか消える（射程の外へ出る）まで狙い続ける
+    // 選び直すときは、同じ種類のほかの武装が狙っている相手を候補から外す（同じ種類の武装どうしで狙いを分ける）
     class LockOn {
     public:
         // 今ロックオンしている相手を返す。外れていたら選び直す（狙うものがいなければ kind が None）
-        Target Get(World& world, const Vec2& from, float maxRange, bool bodiesFirst) {
+        Target Get(World& world, const Weapon* self, const Vec2& from, float maxRange, bool bodiesFirst) {
             if (kind_ != TargetKind::None) {
                 const Target t = world.FindTargetById(kind_, id_);
                 if (t.kind != TargetKind::None && (t.pos - from).LengthSq() <= maxRange * maxRange) {
                     return t;
                 }
             }
-            const Target t = world.PickLockOnTarget(from, maxRange, bodiesFirst);
+            const Target t = world.PickLockOnTarget(from, maxRange, bodiesFirst, world.TargetsOfSameKind(self));
             kind_ = t.kind;
             id_ = t.id;
+            return t;
+        }
+
+        // 今ロックオンしている相手（位置は入っていない）
+        Target Current() const {
+            Target t;
+            t.kind = kind_;
+            t.id = id_;
             return t;
         }
 
@@ -156,6 +165,10 @@ namespace {
                           firstDelay) {}
 
         bool HasTurret() const override { return true; }
+        // 攻撃型は特定の相手を狙わない
+        Target CurrentTarget() const override {
+            return Kind().variant == WeaponVariant::RapidAttack ? Target() : lock_.Current();
+        }
         float TurretAngle() const override { return facing_; }
 
     protected:
@@ -246,7 +259,7 @@ namespace {
                 Vec2 center;
                 const bool crowd = Kind().variant == WeaponVariant::RapidAttack && world.FindCrowdCenter(center);
                 if (!crowd) {
-                    const Target target = (Kind().variant == WeaponVariant::RapidBarrage) ? lock_.Get(world, origin, NoRange, false)
+                    const Target target = (Kind().variant == WeaponVariant::RapidBarrage) ? lock_.Get(world, this, origin, NoRange, false)
                                                                                            : world.FindNearestTarget(origin);
                     if (target.kind == TargetKind::None) return false;
                     center = target.pos;
@@ -257,7 +270,7 @@ namespace {
             }
             case WeaponVariant::RapidClose: {
                 // 近接防御型：敵本体と敵の弾を区別せずに、射程内の近い順3つからロックオンし、先読みで狙う
-                const Target target = lock_.Get(world, origin, Config::RapidCloseRange, false);
+                const Target target = lock_.Get(world, this, origin, Config::RapidCloseRange, false);
                 if (target.kind == TargetKind::None) return false;
                 tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
@@ -265,7 +278,7 @@ namespace {
             }
             default: {
                 // 基本型：敵本体と敵の弾を区別せずに、近い順3つからロックオンし、先読みで狙う
-                const Target target = lock_.Get(world, origin, NoRange, false);
+                const Target target = lock_.Get(world, this, origin, NoRange, false);
                 if (target.kind == TargetKind::None) return false;
                 tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
@@ -306,9 +319,11 @@ namespace {
                 // 基本型は敵本体の近い順3体（本体がいなければ敵の弾）からロックオンする
                 Target target;
                 if (Kind().variant == WeaponVariant::BeamDecisive) {
-                    target = world.FindHighestHpTarget(origin);
+                    // 同じ種類のほかの武装が狙っている相手を除いて、HPが最も高い敵
+                    target = world.FindHighestHpTarget(origin, world.TargetsOfSameKind(this));
+                    decisiveTarget_ = target;
                 } else if (Kind().variant == WeaponVariant::BeamBasic) {
-                    target = lock_.Get(world, origin, NoRange, true);
+                    target = lock_.Get(world, this, origin, NoRange, true);
                 } else {
                     target = world.FindNearestTarget(origin);
                 }
@@ -333,6 +348,17 @@ namespace {
 
     private:
         LockOn lock_;  // ロックオンしている相手
+
+    public:
+        // 決戦型はHPが最も高い敵、基本型はロックオンしている相手（攻撃型は特定の相手を狙わない）
+        Target CurrentTarget() const override {
+            if (Kind().variant == WeaponVariant::BeamDecisive) return decisiveTarget_;
+            if (Kind().variant == WeaponVariant::BeamBasic) return lock_.Current();
+            return Target();
+        }
+
+    private:
+        Target decisiveTarget_;
     };
 
     // 誘導兵器。基本型は最も近い敵、攻撃型は敵が多い場所（爆発が大きい）を追いかける。
@@ -355,11 +381,11 @@ namespace {
                 break;
             case WeaponVariant::MissileClose:
                 // 近接防御型：近くの近い順3つ（敵本体と敵の弾を区別しない）からロックオンする
-                target = lock_.Get(world, origin, Config::MissileCloseRange, false);
+                target = lock_.Get(world, this, origin, Config::MissileCloseRange, false);
                 break;
             default:
                 // 基本型：敵本体と敵の弾を区別せずに、近い順3つからロックオンする
-                target = lock_.Get(world, origin, NoRange, false);
+                target = lock_.Get(world, this, origin, NoRange, false);
                 break;
             }
             if (target.kind == TargetKind::None) {
@@ -372,17 +398,17 @@ namespace {
                 blast *= Config::MissileAttackBlastScale;
             }
             {
+                // 撃ち出す向きだけを決める。狙う相手は、誘導弾がまっすぐ進み終えたあと（近接防御型はすぐに）自分で選ぶ
                 Missile m;
+                m.kind = Kind();
                 m.heading = baseHeading;
                 m.pos = origin + Vec2::FromAngle(m.heading) * Config::CoreRadius;
-                m.targetKind = target.kind;
-                m.targetId = target.id;
+                m.straightSeconds = (Kind().variant == WeaponVariant::MissileClose) ? 0.0f : Config::MissileStraightSeconds;
+                m.bodiesFirst = (Kind().variant == WeaponVariant::MissileAttack);
                 m.damage = Config::MissileDamage * PowerScale(Config::PartPowerRate);
                 m.turnDegrees = Config::MissileTurnDegrees *
                                 (1.0f + Config::MissileHomingRate * static_cast<float>(CountPart(PartKind::Homing)));
                 m.blastRadius = blast;
-                // 狙い直すときも、弾を含めて探すか（基本型・近接防御型）
-                m.targetsBullets = Kind().variant != WeaponVariant::MissileAttack;
                 world.AddMissile(m);
             }
             return true;
@@ -390,6 +416,11 @@ namespace {
 
     private:
         LockOn lock_;  // ロックオンしている相手
+
+    public:
+        Target CurrentTarget() const override {
+            return Kind().variant == WeaponVariant::MissileAttack ? Target() : lock_.Current();
+        }
     };
 
     // 炸裂弾。基本型は敵が多い場所の、中心の少し手前で炸裂させる。決戦型はHPが最も高い敵に直撃させる
@@ -410,8 +441,10 @@ namespace {
             Vec2 aim;
             float distance = 0.0f;
             if (Kind().variant == WeaponVariant::ShellDecisive) {
-                const Target target = world.FindHighestHpTarget(origin);
+                // 同じ種類のほかの武装が狙っている相手を除いて、HPが最も高い敵
+                const Target target = world.FindHighestHpTarget(origin, world.TargetsOfSameKind(this));
                 if (target.kind == TargetKind::None) return false;
+                decisiveTarget_ = target;
                 aim = LeadTarget(origin, target.pos, target.vel, Config::ShellSpeed);
                 distance = Config::ShellDecisiveRange;  // 当たるまで飛ぶ
             } else {
@@ -452,6 +485,14 @@ namespace {
 
         float volleyAngle_ = 0.0f;
         float volleyDistance_ = 0.0f;
+
+    public:
+        Target CurrentTarget() const override {
+            return Kind().variant == WeaponVariant::ShellDecisive ? decisiveTarget_ : Target();
+        }
+
+    private:
+        Target decisiveTarget_;
     };
 
     int BaseEnergy(WeaponVariant v) {
@@ -635,8 +676,12 @@ WeaponKind NextBarrelStep(const WeaponKind& kind) {
 
 std::string WeaponName(const WeaponKind& kind) {
     std::string name = VariantName(kind.variant);
-    if (kind.barrels > 1) {
-        name += "（" + std::to_string(kind.barrels) + "連装）";
+    switch (kind.barrels) {
+    case 2: name += "（連装）"; break;
+    case 3: name += "（三連装）"; break;
+    case 4: name += "（四連装）"; break;
+    case 8: name += "（八連装）"; break;
+    default: break;
     }
     return name;
 }
