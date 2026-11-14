@@ -283,6 +283,51 @@ Target World::FindNearestAny(const Vec2& from, float maxRange) const {
     return best;
 }
 
+std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRange, bool bodiesFirst, size_t count) const {
+    std::vector<std::pair<float, Target>> found;
+    const float rangeSq = maxRange * maxRange;
+    for (const Enemy& e : enemies_) {
+        const float d = (e.pos - from).LengthSq();
+        if (e.alive && d <= rangeSq) {
+            Target t;
+            t.kind = TargetKind::Enemy;
+            t.id = e.id;
+            t.pos = e.pos;
+            t.vel = e.vel;
+            found.emplace_back(d, t);
+        }
+    }
+    if (!bodiesFirst || found.empty()) {
+        for (const Bullet& b : enemyBullets_) {
+            const float d = (b.pos - from).LengthSq();
+            if (b.alive && d <= rangeSq) {
+                Target t;
+                t.kind = TargetKind::EnemyBullet;
+                t.id = b.id;
+                t.pos = b.pos;
+                t.vel = b.vel;
+                found.emplace_back(d, t);
+            }
+        }
+    }
+    const size_t n = std::min(count, found.size());
+    std::partial_sort(found.begin(), found.begin() + static_cast<std::ptrdiff_t>(n), found.end(),
+                      [](const std::pair<float, Target>& a, const std::pair<float, Target>& b) { return a.first < b.first; });
+    std::vector<Target> result;
+    for (size_t i = 0; i < n; ++i) {
+        result.push_back(found[i].second);
+    }
+    return result;
+}
+
+Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst) {
+    const std::vector<Target> candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates);
+    if (candidates.empty()) {
+        return Target();
+    }
+    return candidates[std::uniform_int_distribution<size_t>(0, candidates.size() - 1)(rng_)];
+}
+
 Target World::FindHighestHpTarget(const Vec2& from) const {
     Target best;
     float bestHp = 0.0f;
@@ -591,8 +636,8 @@ void World::MoveMissiles(float dt) {
         if (m.age > Config::MissileStraightSeconds) {
             Target target = FindTargetById(m.targetKind, m.targetId);
             if (target.kind == TargetKind::None) {
-                // 狙った相手がいなくなったら、別の相手を狙い直す
-                target = m.targetsBullets ? FindNearestAny(m.pos, 1.0e9f) : FindNearestTarget(m.pos);
+                // 狙った相手がいなくなったら、別の相手を狙い直す（基本型・近接防御型は近い順3つからランダムにロックオン）
+                target = m.targetsBullets ? PickLockOnTarget(m.pos, 1.0e9f, false) : FindNearestTarget(m.pos);
                 m.targetKind = target.kind;
                 m.targetId = target.id;
             }

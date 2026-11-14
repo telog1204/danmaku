@@ -105,6 +105,9 @@ namespace Config {
     constexpr float ShellVolleyGap = 0.1f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）
     constexpr float ShellFanDegrees = 8.0f;          // 炸裂弾：扇形で1門ごとに向きを変える角度
 
+    // ロックオン：「最も近い敵」を狙う武装は、近い順にこの数までの中からランダムに選んでロックオンする
+    constexpr size_t LockOnCandidates = 3;
+
     // 開始時のエネルギー上限
     constexpr int StartEnergy = 3;
 
