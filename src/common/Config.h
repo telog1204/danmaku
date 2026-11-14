@@ -30,7 +30,10 @@ namespace Config {
     constexpr float RapidGunDamage = 1.0f;
     constexpr float RapidGunSpreadDegrees = 2.0f; // 狙いからずれる最大の角度（度）
     constexpr float RapidTurnDegrees = 360.0f;    // 砲が1秒間に旋回できる角度（度）
-    constexpr float RapidTurretLength = 12.0f;    // コアの上に描く砲身の長さ（コアのふちから）
+    // 狙っていた相手がいなくなり、次の相手との角度の差がこれより大きいときは、撃つのをやめて速く旋回する
+    constexpr float RapidRetargetDegrees = 45.0f;
+    constexpr float RapidFastTurnDegrees = 720.0f; // そのときの旋回の速さ（度/秒）
+    constexpr float RapidResumeDegrees = 10.0f;    // 角度の差がこれ以内になったら、撃つのを再開してふだんの旋回に戻る
     constexpr float PlayerBulletRadius = 3.0f;
     constexpr int RapidGunEnergy = 1;
 

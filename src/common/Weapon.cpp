@@ -147,26 +147,50 @@ namespace {
         // 毎回、狙う方向を決めて、そちらへ砲を旋回させる（1秒間に回れる角度には上限がある）
         void Think(World& world, float dt) override {
             float desired = 0.0f;
-            hasTarget_ = DesiredAngle(world, desired);
+            Target tracked;
+            hasTarget_ = DesiredAngle(world, desired, tracked);
+
+            // 狙っていた相手がいなくなったかを見る（次の相手を狙うときの旋回の仕方を決めるため）
+            if (trackedKind_ != TargetKind::None && (tracked.kind != trackedKind_ || tracked.id != trackedId_) &&
+                world.FindTargetById(trackedKind_, trackedId_).kind == TargetKind::None) {
+                lostTarget_ = true;
+            }
+            trackedKind_ = tracked.kind;
+            trackedId_ = tracked.id;
+
             if (Kind().variant == WeaponVariant::RapidClose) {
                 // 近接防御型：ふだんは待ち、射程内に何か入った瞬間にそちらへ向き直って撃ち始める。
                 // 射程内に何もいなくなったら、撃つのをやめて待つ状態に戻る
                 if (hasTarget_ && !engaged_) {
                     facing_ = desired;
+                    lostTarget_ = false;
+                    fastTurning_ = false;
                 }
                 engaged_ = hasTarget_;
             }
             if (!hasTarget_) {
                 return;  // 狙うものがいなければ、向きはそのまま
             }
-            const float maxTurn = DegreesToRadians(Config::RapidTurnDegrees) * dt;
+
+            // 狙っていた相手がいなくなって次の相手を狙うとき：角度の差が大きければ、撃つのをやめて速く旋回する
+            if (lostTarget_) {
+                lostTarget_ = false;
+                if (std::fabs(WrapAngle(desired - facing_)) > DegreesToRadians(Config::RapidRetargetDegrees)) {
+                    fastTurning_ = true;
+                }
+            }
+            const float turnDegrees = fastTurning_ ? Config::RapidFastTurnDegrees : Config::RapidTurnDegrees;
+            const float maxTurn = DegreesToRadians(turnDegrees) * dt;
             facing_ = WrapAngle(facing_ + std::max(-maxTurn, std::min(maxTurn, WrapAngle(desired - facing_))));
+            if (fastTurning_ && std::fabs(WrapAngle(desired - facing_)) <= DegreesToRadians(Config::RapidResumeDegrees)) {
+                fastTurning_ = false;  // 向き直ったら、撃つのを再開してふだんの旋回に戻る
+            }
         }
 
         // 弾は、狙う方向ではなく今向いている方向へ出る（旋回中も撃ち続ける）
         bool FireShot(World& world, int /*shot*/) override {
-            if (!hasTarget_) {
-                return false;
+            if (!hasTarget_ || fastTurning_) {
+                return false;  // 狙うものがいないときと、速く旋回している間は撃たない
             }
             const Vec2 origin = world.GetCore().pos;
             // ほんの少しばらけて飛ぶ（収束を付けるほど小さくなる）
@@ -189,8 +213,9 @@ namespace {
         }
 
     private:
-        // 狙う方向を求める。狙うものがいなければ false
-        bool DesiredAngle(const World& world, float& angle) const {
+        // 狙う方向を求める。狙うものがいなければ false。
+        // tracked には狙っている相手を入れる（攻撃型のように特定の相手を狙わないときは None のまま）
+        bool DesiredAngle(const World& world, float& angle, Target& tracked) const {
             const Vec2 origin = world.GetCore().pos;
             switch (Kind().variant) {
             case WeaponVariant::RapidBarrage:
@@ -203,6 +228,7 @@ namespace {
                                                                                            : world.FindNearestTarget(origin);
                     if (target.kind == TargetKind::None) return false;
                     center = target.pos;
+                    tracked = target;
                 }
                 angle = AngleOf(center - origin) + sweepPhase_ * DegreesToRadians(Config::RapidSweepDegrees);
                 return true;
@@ -211,6 +237,7 @@ namespace {
                 // 近接防御型：敵本体と敵の弾を区別せずに、射程内で最も近いものを先読みで狙う
                 const Target target = world.FindNearestAny(origin, Config::RapidCloseRange);
                 if (target.kind == TargetKind::None) return false;
+                tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
                 return true;
             }
@@ -218,6 +245,7 @@ namespace {
                 // 基本型：敵本体と敵の弾を区別せずに、最も近いものを先読みで狙う
                 const Target target = world.FindNearestAny(origin, NoRange);
                 if (target.kind == TargetKind::None) return false;
+                tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
                 return true;
             }
@@ -227,6 +255,10 @@ namespace {
         float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
         bool hasTarget_ = false;     // 今、狙うものがいるか
         bool engaged_ = false;       // 近接防御型：撃ち続けているか
+        TargetKind trackedKind_ = TargetKind::None;  // 前の回に狙っていた相手
+        int trackedId_ = 0;
+        bool lostTarget_ = false;    // 狙っていた相手がいなくなった（次の相手を狙うときに旋回の仕方を決める）
+        bool fastTurning_ = false;   // 撃つのをやめて速く旋回している
         float sweepPhase_ = 0.0f;
         float sweepDir_ = 1.0f;
         int mountIndex_ = 0;  // 次に撃つ砲

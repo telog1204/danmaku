@@ -190,15 +190,6 @@ void DrawWorld(const World& world) {
     // 光るもの（コア・敵・弾）は加算合成で描く
     SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
     DrawCore(world.GetCore());
-    // 速射砲の砲身（向いている方向へ伸びる短い線。同じ向きの砲身は重なる）
-    for (const auto& w : world.Weapons()) {
-        if (!w->HasTurret()) continue;
-        const Core& core = world.GetCore();
-        const Vec2 dir = Vec2::FromAngle(w->TurretAngle());
-        const Vec2 from = core.pos + dir * (core.radius * 0.5f);
-        const Vec2 to = core.pos + dir * (core.radius + Config::RapidTurretLength);
-        DrawLine(Px(from.x), Px(from.y), Px(to.x), Px(to.y), GetColor(150, 230, 255), 3);
-    }
     for (const Enemy& e : world.Enemies()) {
         DrawEnemy(e);
     }
