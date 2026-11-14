@@ -283,6 +283,16 @@ const char* WeaponName(WeaponKind kind) {
     return "";
 }
 
+const char* WeaponDescription(WeaponKind kind) {
+    switch (kind) {
+    case WeaponKind::RapidGun: return "最も近い敵を狙い、小さく速い弾を連射する。";
+    case WeaponKind::Beam: return "敵を貫く速いビームを撃つ。貫くたびに威力が下がる。";
+    case WeaponKind::Missile: return "敵を追いかける弾を撃つ。当たると小さな爆発で周りを巻き込む。";
+    case WeaponKind::Shell: return "敵が多い場所の手前で炸裂し、残る爆炎と前方への破片で敵をまとめて倒す。";
+    }
+    return "";
+}
+
 int WeaponEnergy(WeaponKind kind) {
     switch (kind) {
     case WeaponKind::RapidGun: return Config::RapidGunEnergy;

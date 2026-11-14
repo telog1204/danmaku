@@ -46,6 +46,12 @@ namespace {
             DrawTriangle(x, y - r - 3, x - r, y, x + r, y, GetColor(230, 80, 255), TRUE);
             DrawTriangle(x, y + r + 3, x - r, y, x + r, y, GetColor(230, 80, 255), TRUE);
             break;
+        case EnemyType::Boss:
+            // 大きな四角（重装型を大きくした形）。HPは画面の上に出すので、ここでは出さない
+            DrawCircle(x, y, Px(e.radius * 1.9f), GetColor(58, 16, 16), TRUE);
+            DrawBox(x - r, y - r, x + r, y + r, GetColor(255, 176, 144), TRUE);
+            DrawBox(x - r + 4, y - r + 4, x + r - 4, y + r - 4, GetColor(255, 90, 60), TRUE);
+            return;
         }
         // HPが減っていたら、残りを細い線で出す
         if (e.hp < e.maxHp) {
@@ -67,6 +73,23 @@ namespace {
         DrawFormatString(barX, barY + 14, GetColor(255, 255, 255), "HP %d / %d", core.hp, core.maxHp);
         DrawFormatString(540, barY, GetColor(255, 255, 255), "TIME %6.1f", world.ElapsedSeconds());
 
+        // 強敵のHP（画面の上の中央）。現れる少し前は「強敵接近」を点滅させる
+        if (const Enemy* boss = world.FindBoss()) {
+            const int bx = 250;
+            const int by = 78;
+            const int bw = 300;
+            const char* label = "強敵";
+            DrawString((Config::ScreenWidth - GetDrawStringWidth(label, static_cast<int>(std::strlen(label)))) / 2, 58,
+                       label, GetColor(255, 154, 154));
+            DrawBox(bx, by, bx + bw, by + 10, GetColor(60, 30, 30), TRUE);
+            DrawBox(bx, by, bx + static_cast<int>(bw * std::max(0.0f, boss->hp) / boss->maxHp), by + 10,
+                    GetColor(255, 80, 80), TRUE);
+        } else if (world.IsBossWarning() && static_cast<int>(world.ElapsedSeconds() * 4.0f) % 2 == 0) {
+            const char* label = "強敵接近";
+            DrawString((Config::ScreenWidth - GetDrawStringWidth(label, static_cast<int>(std::strlen(label)))) / 2, 64,
+                       label, GetColor(255, 90, 90));
+        }
+
         // 積んでいる武装（同じものはまとめて数を出す）
         int y = Config::ScreenHeight - 22;
         const auto& weapons = world.Weapons();
@@ -85,8 +108,8 @@ namespace {
             y -= 20;
         }
 
-        // 拾ったものの知らせ（画面の上、新しいものほど下）
-        int my = 70;
+        // 拾ったものの知らせ（強敵のHPの下、新しいものほど下）
+        int my = 96;
         for (const Message& m : world.Messages()) {
             unsigned int color = GetColor(255, 233, 160);
             if (m.kind == PickupKind::Part) color = GetColor(217, 194, 255);
