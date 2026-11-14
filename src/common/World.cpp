@@ -592,7 +592,7 @@ void World::MoveMissiles(float dt) {
             Target target = FindTargetById(m.targetKind, m.targetId);
             if (target.kind == TargetKind::None) {
                 // 狙った相手がいなくなったら、別の相手を狙い直す
-                target = FindNearestTarget(m.pos);
+                target = m.targetsBullets ? FindNearestAny(m.pos, 1.0e9f) : FindNearestTarget(m.pos);
                 m.targetKind = target.kind;
                 m.targetId = target.id;
             }

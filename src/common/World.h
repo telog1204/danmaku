@@ -57,6 +57,7 @@ struct Missile {
     float damage = 0.0f;
     float turnDegrees = 0.0f;   // 1秒間に曲がれる角度
     float blastRadius = 0.0f;   // 消えるときの爆発の半径
+    bool targetsBullets = false; // 狙った相手がいなくなったとき、敵の弾も含めて最も近いものを狙い直すか
     bool alive = true;
 };
 
