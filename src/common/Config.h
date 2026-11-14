@@ -29,6 +29,8 @@ namespace Config {
     constexpr float RapidGunBulletSpeed = 600.0f; // 弾の速さ（ドット/秒）
     constexpr float RapidGunDamage = 1.0f;
     constexpr float RapidGunSpreadDegrees = 2.0f; // 狙いからずれる最大の角度（度）
+    constexpr float RapidTurnDegrees = 360.0f;    // 砲が1秒間に旋回できる角度（度）
+    constexpr float RapidTurretLength = 12.0f;    // コアの上に描く砲身の長さ（コアのふちから）
     constexpr float PlayerBulletRadius = 3.0f;
     constexpr int RapidGunEnergy = 1;
 
@@ -76,7 +78,7 @@ namespace Config {
     constexpr float RapidSweepDegrees = 30.0f;       // 速射砲 弾幕型・攻撃型：扇形に往復する幅（片側の角度）
     constexpr float RapidSweepSpeedDegrees = 120.0f; // 往復する速さ（度/秒）
     constexpr float RapidCloseInterval = 0.05f;      // 速射砲 近接防御型：撃つ間隔
-    constexpr float RapidCloseRange = 150.0f;        // 速射砲 近接防御型：射程（これより遠くには撃たない）
+    constexpr float RapidCloseRange = 150.0f;        // 速射砲 近接防御型：この距離に何か入ったら撃ち始め、いなくなったらやめる
     constexpr int RapidBarrageEnergy = 2;
     constexpr int RapidAttackEnergy = 2;
     constexpr int RapidCloseEnergy = 2;

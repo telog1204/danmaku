@@ -36,6 +36,13 @@ namespace {
 
     float AngleOf(const Vec2& v) { return std::atan2(v.y, v.x); }
 
+    // 角度を −π〜π に収める
+    float WrapAngle(float a) {
+        while (a > Pi) a -= 2.0f * Pi;
+        while (a < -Pi) a += 2.0f * Pi;
+        return a;
+    }
+
     // 射程の制限なし（距離に関係なく最も近いものを探す）
     constexpr float NoRange = 1.0e9f;
 
@@ -53,6 +60,7 @@ namespace {
 
         void Update(World& world, float dt) override {
             Tick(dt);
+            Think(world, dt);
             // 一斉射の残りを、時間をずらして撃つ（狙うものがいなくなったら、残りはやめる）
             if (pendingShots_ > 0) {
                 volleyTimer_ -= dt;
@@ -91,6 +99,8 @@ namespace {
         virtual bool FireShot(World& world, int shot) = 0;
         // 撃つかどうかに関係なく、毎回進める処理（扇形の往復など）
         virtual void Tick(float /*dt*/) {}
+        // 撃つかどうかに関係なく、毎回 World を見て進める処理（砲の旋回など）
+        virtual void Think(World& /*world*/, float /*dt*/) {}
 
         // 威力強化を反映した倍率
         float PowerScale(float ratePerPart) const {
@@ -123,6 +133,9 @@ namespace {
                               static_cast<float>(kind.barrels),
                           firstDelay) {}
 
+        bool HasTurret() const override { return true; }
+        float TurretAngle() const override { return facing_; }
+
     protected:
         void Tick(float dt) override {
             // −1〜1 を往復する（三角波）
@@ -131,9 +144,54 @@ namespace {
             if (sweepPhase_ < -1.0f) { sweepPhase_ = -2.0f - sweepPhase_; sweepDir_ = 1.0f; }
         }
 
+        // 毎回、狙う方向を決めて、そちらへ砲を旋回させる（1秒間に回れる角度には上限がある）
+        void Think(World& world, float dt) override {
+            float desired = 0.0f;
+            hasTarget_ = DesiredAngle(world, desired);
+            if (Kind().variant == WeaponVariant::RapidClose) {
+                // 近接防御型：ふだんは待ち、射程内に何か入った瞬間にそちらへ向き直って撃ち始める。
+                // 射程内に何もいなくなったら、撃つのをやめて待つ状態に戻る
+                if (hasTarget_ && !engaged_) {
+                    facing_ = desired;
+                }
+                engaged_ = hasTarget_;
+            }
+            if (!hasTarget_) {
+                return;  // 狙うものがいなければ、向きはそのまま
+            }
+            const float maxTurn = DegreesToRadians(Config::RapidTurnDegrees) * dt;
+            facing_ = WrapAngle(facing_ + std::max(-maxTurn, std::min(maxTurn, WrapAngle(desired - facing_))));
+        }
+
+        // 弾は、狙う方向ではなく今向いている方向へ出る（旋回中も撃ち続ける）
         bool FireShot(World& world, int /*shot*/) override {
+            if (!hasTarget_) {
+                return false;
+            }
             const Vec2 origin = world.GetCore().pos;
-            float angle = 0.0f;
+            // ほんの少しばらけて飛ぶ（収束を付けるほど小さくなる）
+            const float spread = DegreesToRadians(Config::RapidGunSpreadDegrees) *
+                                 std::pow(Config::RapidFocusMultiplier, static_cast<float>(CountPart(PartKind::Focus)));
+            const Vec2 side = Vec2::FromAngle(facing_).Perpendicular();
+            // 並べた砲から1門ずつ順番に撃つ
+            const int mounts = RapidMounts(Barrels());
+            const int mount = mountIndex_ % mounts;
+            mountIndex_ = (mountIndex_ + 1) % mounts;
+            const Vec2 dir = Vec2::FromAngle(facing_ + world.RandomRange(-spread, spread));
+            Bullet b;
+            b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(mount, mounts, Config::RapidBarrelSpacing);
+            b.vel = dir * Config::RapidGunBulletSpeed;
+            b.radius = Config::PlayerBulletRadius;
+            b.damage = Config::RapidGunDamage * PowerScale(Config::PartPowerRate);
+            b.pierceChance = std::min(1.0f, Config::RapidPierceChancePerPart * static_cast<float>(CountPart(PartKind::Pierce)));
+            world.AddPlayerBullet(b);
+            return true;
+        }
+
+    private:
+        // 狙う方向を求める。狙うものがいなければ false
+        bool DesiredAngle(const World& world, float& angle) const {
+            const Vec2 origin = world.GetCore().pos;
             switch (Kind().variant) {
             case WeaponVariant::RapidBarrage:
             case WeaponVariant::RapidAttack: {
@@ -147,47 +205,28 @@ namespace {
                     center = target.pos;
                 }
                 angle = AngleOf(center - origin) + sweepPhase_ * DegreesToRadians(Config::RapidSweepDegrees);
-                break;
+                return true;
             }
             case WeaponVariant::RapidClose: {
+                // 近接防御型：敵本体と敵の弾を区別せずに、射程内で最も近いものを先読みで狙う
                 const Target target = world.FindNearestAny(origin, Config::RapidCloseRange);
                 if (target.kind == TargetKind::None) return false;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
-                break;
+                return true;
             }
             default: {
-                // 基本型：敵本体と敵の弾を区別せずに、最も近いものを狙う
+                // 基本型：敵本体と敵の弾を区別せずに、最も近いものを先読みで狙う
                 const Target target = world.FindNearestAny(origin, NoRange);
                 if (target.kind == TargetKind::None) return false;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
-                break;
+                return true;
             }
             }
-            // ほんの少しばらけて飛ぶ（収束を付けるほど小さくなる）
-            const float spread = DegreesToRadians(Config::RapidGunSpreadDegrees) *
-                                 std::pow(Config::RapidFocusMultiplier, static_cast<float>(CountPart(PartKind::Focus)));
-            const Vec2 side = Vec2::FromAngle(angle).Perpendicular();
-            // 並べた砲から1門ずつ順番に撃つ
-            const int mounts = RapidMounts(Barrels());
-            const int mount = mountIndex_ % mounts;
-            mountIndex_ = (mountIndex_ + 1) % mounts;
-            {
-                const Vec2 dir = Vec2::FromAngle(angle + world.RandomRange(-spread, spread));
-                Bullet b;
-                b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(mount, mounts, Config::RapidBarrelSpacing);
-                b.vel = dir * Config::RapidGunBulletSpeed;
-                b.radius = Config::PlayerBulletRadius;
-                b.damage = Config::RapidGunDamage * PowerScale(Config::PartPowerRate);
-                b.pierceChance = std::min(1.0f, Config::RapidPierceChancePerPart * static_cast<float>(CountPart(PartKind::Pierce)));
-                if (Kind().variant == WeaponVariant::RapidClose) {
-                    b.life = Config::RapidCloseRange / Config::RapidGunBulletSpeed;  // 射程の外へは飛ばない
-                }
-                world.AddPlayerBullet(b);
-            }
-            return true;
         }
 
-    private:
+        float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
+        bool hasTarget_ = false;     // 今、狙うものがいるか
+        bool engaged_ = false;       // 近接防御型：撃ち続けているか
         float sweepPhase_ = 0.0f;
         float sweepDir_ = 1.0f;
         int mountIndex_ = 0;  // 次に撃つ砲
