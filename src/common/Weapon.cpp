@@ -312,6 +312,11 @@ namespace {
     protected:
         bool FireShot(World& world, int shot) override {
             const Vec2 origin = world.GetCore().pos;
+            if (shot > 0) {
+                // 一斉射の2門目以降は狙い直さず、最初の向きのまま平行に撃つ
+                Launch(world, origin, volleyDir_, shot);
+                return true;
+            }
             Vec2 aim;
             const bool crowd = Kind().variant == WeaponVariant::BeamAttack && world.FindCrowdCenter(aim);
             if (!crowd) {
@@ -332,6 +337,14 @@ namespace {
             }
             const Vec2 dir = (aim - origin).Normalized();
             if (dir.LengthSq() <= 0.0f) return false;
+            volleyDir_ = dir;
+            Launch(world, origin, dir, 0);
+            return true;
+        }
+
+    private:
+        // shot 番目の砲の1発を撃つ（横に並べた砲から、dir の向きに平行に）
+        void Launch(World& world, const Vec2& origin, const Vec2& dir, int shot) {
             const Vec2 side = dir.Perpendicular();
             const float scale = (Kind().variant == WeaponVariant::BeamDecisive) ? Config::BeamDecisiveDamageScale : 1.0f;
             {
@@ -343,11 +356,10 @@ namespace {
                                    Config::BeamDecay + Config::BeamPierceDecayPerPart * static_cast<float>(CountPart(PartKind::Pierce)));
                 world.AddBeam(b);
             }
-            return true;
         }
 
-    private:
         LockOn lock_;  // ロックオンしている相手
+        Vec2 volleyDir_;  // 一斉射の向き（最初の1門を撃った向き）
 
     public:
         // 決戦型はHPが最も高い敵、基本型はロックオンしている相手（攻撃型は特定の相手を狙わない）
@@ -370,8 +382,13 @@ namespace {
             : TimedWeapon(kind, Config::MissileInterval, firstDelay, Config::MissileVolleyGap) {}
 
     protected:
-        bool FireShot(World& world, int /*shot*/) override {
+        bool FireShot(World& world, int shot) override {
             const Vec2 origin = world.GetCore().pos;
+            if (shot > 0) {
+                // 一斉射の2門目以降は狙い直さず、最初に撃ち出した向きのまま撃ち出す
+                Launch(world, origin, volleyHeading_);
+                return true;
+            }
             Target target;
             Vec2 center;
             switch (Kind().variant) {
@@ -391,7 +408,14 @@ namespace {
             if (target.kind == TargetKind::None) {
                 return false;
             }
-            const float baseHeading = AngleOf(target.pos - origin);
+            volleyHeading_ = AngleOf(target.pos - origin);
+            Launch(world, origin, volleyHeading_);
+            return true;
+        }
+
+    private:
+        // 誘導弾を1発、heading の向きへ撃ち出す
+        void Launch(World& world, const Vec2& origin, float baseHeading) {
             float blast = Config::MissileExplosionRadius *
                           (1.0f + Config::MissileBlastRate * static_cast<float>(CountPart(PartKind::BlastRadius)));
             if (Kind().variant == WeaponVariant::MissileAttack) {
@@ -411,10 +435,10 @@ namespace {
                 m.blastRadius = blast;
                 world.AddMissile(m);
             }
-            return true;
         }
 
-    private:
+        float volleyHeading_ = 0.0f;  // 一斉射の向き（最初の1門を撃ち出した向き）
+
         LockOn lock_;  // ロックオンしている相手
 
     public:
