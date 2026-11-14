@@ -79,6 +79,10 @@ public:
     const WeaponKind& Kind() const { return kind_; }
     virtual void Update(World& world, float dt) = 0;
 
+    // 向きを持って旋回する武装（速射砲）か、と今向いている方向（ラジアン）
+    virtual bool HasTurret() const { return false; }
+    virtual float TurretAngle() const { return 0.0f; }
+
     // 付けている強化パーツ（付けた順）
     const std::vector<PartKind>& Parts() const { return parts_; }
     void AddPart(PartKind part) { parts_.push_back(part); }

@@ -36,6 +36,13 @@ namespace {
 
     float AngleOf(const Vec2& v) { return std::atan2(v.y, v.x); }
 
+    // 角度を −π〜π に収める
+    float WrapAngle(float a) {
+        while (a > Pi) a -= 2.0f * Pi;
+        while (a < -Pi) a += 2.0f * Pi;
+        return a;
+    }
+
     // 射程の制限なし（距離に関係なく最も近いものを探す）
     constexpr float NoRange = 1.0e9f;
 
@@ -44,30 +51,56 @@ namespace {
         return (static_cast<float>(i) - (barrels - 1) * 0.5f) * spacing;
     }
 
-    // 撃つ間隔を数える部分は、どの武装も同じ。連射強化を付けるほど間隔が短くなる
+    // 撃つ間隔を数える部分は、どの武装も同じ。連射強化を付けるほど間隔が短くなる。
+    // volleyGap が 0 より大きい武装は、撃つ時間が来るたびに「一斉射」として、1門ずつ volleyGap 秒ずつずらして門数分を続けて撃つ
     class TimedWeapon : public Weapon {
     public:
-        TimedWeapon(const WeaponKind& kind, float interval, float firstDelay)
-            : Weapon(kind), interval_(interval), cooldown_(firstDelay) {}
+        TimedWeapon(const WeaponKind& kind, float interval, float firstDelay, float volleyGap = 0.0f)
+            : Weapon(kind), interval_(interval), cooldown_(firstDelay), volleyGap_(volleyGap) {}
 
         void Update(World& world, float dt) override {
             Tick(dt);
+            Think(world, dt);
+            // 一斉射の残りを、時間をずらして撃つ（狙うものがいなくなったら、残りはやめる）
+            if (pendingShots_ > 0) {
+                volleyTimer_ -= dt;
+                while (pendingShots_ > 0 && volleyTimer_ <= 0.0f) {
+                    if (!FireShot(world, nextShot_)) {
+                        pendingShots_ = 0;
+                        break;
+                    }
+                    ++nextShot_;
+                    --pendingShots_;
+                    volleyTimer_ += volleyGap_;
+                }
+            }
             cooldown_ -= dt;
             if (cooldown_ > 0.0f) {
                 return;
             }
-            if (Fire(world)) {
+            if (pendingShots_ > 0) {
+                cooldown_ = 0.0f;  // 前の一斉射が終わるまで、次は始めない
+                return;
+            }
+            if (FireShot(world, 0)) {
                 cooldown_ += interval_ * std::pow(Config::PartRateMultiplier, static_cast<float>(CountPart(PartKind::Rate)));
+                if (volleyGap_ > 0.0f && Barrels() > 1) {
+                    pendingShots_ = Barrels() - 1;
+                    nextShot_ = 1;
+                    volleyTimer_ = volleyGap_;
+                }
             } else {
                 cooldown_ = 0.0f;  // 狙うものが現れたらすぐ撃てるようにしておく
             }
         }
 
     protected:
-        // 撃てたら true を返す（狙うものがいなければ false）
-        virtual bool Fire(World& world) = 0;
+        // 1発（一斉射なら shot 番目の砲の1発）を撃つ。撃てたら true（狙うものがいなければ false）
+        virtual bool FireShot(World& world, int shot) = 0;
         // 撃つかどうかに関係なく、毎回進める処理（扇形の往復など）
         virtual void Tick(float /*dt*/) {}
+        // 撃つかどうかに関係なく、毎回 World を見て進める処理（砲の旋回など）
+        virtual void Think(World& /*world*/, float /*dt*/) {}
 
         // 威力強化を反映した倍率
         float PowerScale(float ratePerPart) const {
@@ -78,15 +111,30 @@ namespace {
     private:
         float interval_;
         float cooldown_;
+        float volleyGap_;
+        int pendingShots_ = 0;   // 一斉射で、まだ撃っていない砲の数
+        int nextShot_ = 0;       // 次に撃つ砲の番号
+        float volleyTimer_ = 0.0f;
     };
 
+    // 速射砲の連装型で、横に並べる砲の数（4連装は2連装と同じ2門の並びで、発射速度を2倍にする）
+    int RapidMounts(int barrels) {
+        return barrels == 4 ? 2 : barrels;
+    }
+
     // 速射砲。基本型は最も近い敵を先読みで狙う。弾幕型・攻撃型は扇形に往復しながら撃つ。
-    // 近接防御型は、敵本体と敵の弾を区別せずに近くのものだけを、速い連射で狙う
+    // 近接防御型は、敵本体と敵の弾を区別せずに近くのものだけを、速い連射で狙う。
+    // 連装型は、横に並べた砲から1門ずつ順番に撃つ（1発ずつの間隔を門数で割るので、1秒間の弾の数は門数倍）
     class RapidGun : public TimedWeapon {
     public:
         RapidGun(const WeaponKind& kind, float firstDelay)
-            : TimedWeapon(kind, kind.variant == WeaponVariant::RapidClose ? Config::RapidCloseInterval : Config::RapidGunInterval,
+            : TimedWeapon(kind,
+                          (kind.variant == WeaponVariant::RapidClose ? Config::RapidCloseInterval : Config::RapidGunInterval) /
+                              static_cast<float>(kind.barrels),
                           firstDelay) {}
+
+        bool HasTurret() const override { return true; }
+        float TurretAngle() const override { return facing_; }
 
     protected:
         void Tick(float dt) override {
@@ -96,9 +144,54 @@ namespace {
             if (sweepPhase_ < -1.0f) { sweepPhase_ = -2.0f - sweepPhase_; sweepDir_ = 1.0f; }
         }
 
-        bool Fire(World& world) override {
+        // 毎回、狙う方向を決めて、そちらへ砲を旋回させる（1秒間に回れる角度には上限がある）
+        void Think(World& world, float dt) override {
+            float desired = 0.0f;
+            hasTarget_ = DesiredAngle(world, desired);
+            if (Kind().variant == WeaponVariant::RapidClose) {
+                // 近接防御型：ふだんは待ち、射程内に何か入った瞬間にそちらへ向き直って撃ち始める。
+                // 射程内に何もいなくなったら、撃つのをやめて待つ状態に戻る
+                if (hasTarget_ && !engaged_) {
+                    facing_ = desired;
+                }
+                engaged_ = hasTarget_;
+            }
+            if (!hasTarget_) {
+                return;  // 狙うものがいなければ、向きはそのまま
+            }
+            const float maxTurn = DegreesToRadians(Config::RapidTurnDegrees) * dt;
+            facing_ = WrapAngle(facing_ + std::max(-maxTurn, std::min(maxTurn, WrapAngle(desired - facing_))));
+        }
+
+        // 弾は、狙う方向ではなく今向いている方向へ出る（旋回中も撃ち続ける）
+        bool FireShot(World& world, int /*shot*/) override {
+            if (!hasTarget_) {
+                return false;
+            }
             const Vec2 origin = world.GetCore().pos;
-            float angle = 0.0f;
+            // ほんの少しばらけて飛ぶ（収束を付けるほど小さくなる）
+            const float spread = DegreesToRadians(Config::RapidGunSpreadDegrees) *
+                                 std::pow(Config::RapidFocusMultiplier, static_cast<float>(CountPart(PartKind::Focus)));
+            const Vec2 side = Vec2::FromAngle(facing_).Perpendicular();
+            // 並べた砲から1門ずつ順番に撃つ
+            const int mounts = RapidMounts(Barrels());
+            const int mount = mountIndex_ % mounts;
+            mountIndex_ = (mountIndex_ + 1) % mounts;
+            const Vec2 dir = Vec2::FromAngle(facing_ + world.RandomRange(-spread, spread));
+            Bullet b;
+            b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(mount, mounts, Config::RapidBarrelSpacing);
+            b.vel = dir * Config::RapidGunBulletSpeed;
+            b.radius = Config::PlayerBulletRadius;
+            b.damage = Config::RapidGunDamage * PowerScale(Config::PartPowerRate);
+            b.pierceChance = std::min(1.0f, Config::RapidPierceChancePerPart * static_cast<float>(CountPart(PartKind::Pierce)));
+            world.AddPlayerBullet(b);
+            return true;
+        }
+
+    private:
+        // 狙う方向を求める。狙うものがいなければ false
+        bool DesiredAngle(const World& world, float& angle) const {
+            const Vec2 origin = world.GetCore().pos;
             switch (Kind().variant) {
             case WeaponVariant::RapidBarrage:
             case WeaponVariant::RapidAttack: {
@@ -112,58 +205,44 @@ namespace {
                     center = target.pos;
                 }
                 angle = AngleOf(center - origin) + sweepPhase_ * DegreesToRadians(Config::RapidSweepDegrees);
-                break;
+                return true;
             }
             case WeaponVariant::RapidClose: {
+                // 近接防御型：敵本体と敵の弾を区別せずに、射程内で最も近いものを先読みで狙う
                 const Target target = world.FindNearestAny(origin, Config::RapidCloseRange);
                 if (target.kind == TargetKind::None) return false;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
-                break;
+                return true;
             }
             default: {
-                // 基本型：敵本体と敵の弾を区別せずに、最も近いものを狙う
+                // 基本型：敵本体と敵の弾を区別せずに、最も近いものを先読みで狙う
                 const Target target = world.FindNearestAny(origin, NoRange);
                 if (target.kind == TargetKind::None) return false;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
-                break;
+                return true;
             }
             }
-            // ほんの少しばらけて飛ぶ（収束を付けるほど小さくなる）
-            const float spread = DegreesToRadians(Config::RapidGunSpreadDegrees) *
-                                 std::pow(Config::RapidFocusMultiplier, static_cast<float>(CountPart(PartKind::Focus)));
-            const float baseAngle = angle;
-            const Vec2 side = Vec2::FromAngle(baseAngle).Perpendicular();
-            for (int i = 0; i < Barrels(); ++i) {
-                const Vec2 dir = Vec2::FromAngle(baseAngle + world.RandomRange(-spread, spread));
-                Bullet b;
-                b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(i, Barrels(), Config::RapidBarrelSpacing);
-                b.vel = dir * Config::RapidGunBulletSpeed;
-                b.radius = Config::PlayerBulletRadius;
-                b.damage = Config::RapidGunDamage * PowerScale(Config::PartPowerRate);
-                b.pierceChance = std::min(1.0f, Config::RapidPierceChancePerPart * static_cast<float>(CountPart(PartKind::Pierce)));
-                if (Kind().variant == WeaponVariant::RapidClose) {
-                    b.life = Config::RapidCloseRange / Config::RapidGunBulletSpeed;  // 射程の外へは飛ばない
-                }
-                world.AddPlayerBullet(b);
-            }
-            return true;
         }
 
-    private:
+        float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
+        bool hasTarget_ = false;     // 今、狙うものがいるか
+        bool engaged_ = false;       // 近接防御型：撃ち続けているか
         float sweepPhase_ = 0.0f;
         float sweepDir_ = 1.0f;
+        int mountIndex_ = 0;  // 次に撃つ砲
     };
 
-    // ビーム砲。基本型は最も近い敵、攻撃型は敵が多い方向、決戦型はHPが最も高い敵を狙う
+    // ビーム砲。基本型は最も近い敵、攻撃型は敵が多い方向、決戦型はHPが最も高い敵を狙う。
+    // 連装型は、横に並べた砲から1門ずつ素早く続けて撃つ（1門ごとに狙い直す）
     class BeamGun : public TimedWeapon {
     public:
         BeamGun(const WeaponKind& kind, float firstDelay)
             : TimedWeapon(kind,
                           Config::BeamInterval * (kind.variant == WeaponVariant::BeamDecisive ? Config::BeamDecisiveIntervalScale : 1.0f),
-                          firstDelay) {}
+                          firstDelay, Config::BeamVolleyGap) {}
 
     protected:
-        bool Fire(World& world) override {
+        bool FireShot(World& world, int shot) override {
             const Vec2 origin = world.GetCore().pos;
             Vec2 aim;
             const bool crowd = Kind().variant == WeaponVariant::BeamAttack && world.FindCrowdCenter(aim);
@@ -177,9 +256,9 @@ namespace {
             if (dir.LengthSq() <= 0.0f) return false;
             const Vec2 side = dir.Perpendicular();
             const float scale = (Kind().variant == WeaponVariant::BeamDecisive) ? Config::BeamDecisiveDamageScale : 1.0f;
-            for (int i = 0; i < Barrels(); ++i) {
+            {
                 Beam b;
-                b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(i, Barrels(), Config::BeamBarrelSpacing);
+                b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(shot, Barrels(), Config::BeamBarrelSpacing);
                 b.vel = dir * Config::BeamSpeed;
                 b.damage = Config::BeamDamage * scale * PowerScale(Config::PartPowerRate);
                 b.decay = std::min(Config::BeamDecayMax,
@@ -192,12 +271,14 @@ namespace {
 
     // 誘導兵器。基本型は最も近い敵、攻撃型は敵が多い場所（爆発が大きい）を追いかける。
     // 近接防御型は、敵本体か敵の弾が近くに来たときだけ撃つ
+    // 連装型は、全門が同じ向きに、少しずつ時間をずらして撃ち出す（1門ごとに狙い直す）
     class MissileLauncher : public TimedWeapon {
     public:
-        MissileLauncher(const WeaponKind& kind, float firstDelay) : TimedWeapon(kind, Config::MissileInterval, firstDelay) {}
+        MissileLauncher(const WeaponKind& kind, float firstDelay)
+            : TimedWeapon(kind, Config::MissileInterval, firstDelay, Config::MissileVolleyGap) {}
 
     protected:
-        bool Fire(World& world) override {
+        bool FireShot(World& world, int /*shot*/) override {
             const Vec2 origin = world.GetCore().pos;
             Target target;
             Vec2 center;
@@ -223,10 +304,9 @@ namespace {
             if (Kind().variant == WeaponVariant::MissileAttack) {
                 blast *= Config::MissileAttackBlastScale;
             }
-            // 連装型は、撃ち出す向きを少しずつずらす
-            for (int i = 0; i < Barrels(); ++i) {
+            {
                 Missile m;
-                m.heading = baseHeading + DegreesToRadians(BarrelOffset(i, Barrels(), Config::MissileBarrelSpreadDegrees));
+                m.heading = baseHeading;
                 m.pos = origin + Vec2::FromAngle(m.heading) * Config::CoreRadius;
                 m.targetKind = target.kind;
                 m.targetId = target.id;
@@ -243,13 +323,20 @@ namespace {
     };
 
     // 炸裂弾。基本型は敵が多い場所の、中心の少し手前で炸裂させる。決戦型はHPが最も高い敵に直撃させる
+    // 連装型は、1門ごとに向きを変えた扇形で、少しずつ時間をずらして続けて撃つ（扇形の中心は撃ち始めたときの狙い）
     class ShellCannon : public TimedWeapon {
     public:
-        ShellCannon(const WeaponKind& kind, float firstDelay) : TimedWeapon(kind, Config::ShellInterval, firstDelay) {}
+        ShellCannon(const WeaponKind& kind, float firstDelay)
+            : TimedWeapon(kind, Config::ShellInterval, firstDelay, Config::ShellVolleyGap) {}
 
     protected:
-        bool Fire(World& world) override {
+        bool FireShot(World& world, int shot) override {
             const Vec2 origin = world.GetCore().pos;
+            if (shot > 0) {
+                // 一斉射の2発目以降は、撃ち始めたときの向きと距離を使う
+                Launch(world, origin, volleyAngle_, volleyDistance_, shot);
+                return true;
+            }
             Vec2 aim;
             float distance = 0.0f;
             if (Kind().variant == WeaponVariant::ShellDecisive) {
@@ -266,12 +353,21 @@ namespace {
                 }
                 distance = std::max(Config::CoreRadius + 10.0f, (aim - origin).Length() - Config::ShellShortDistance);
             }
-            const Vec2 dir = (aim - origin).Normalized();
-            if (dir.LengthSq() <= 0.0f) return false;
-            const Vec2 side = dir.Perpendicular();
-            for (int i = 0; i < Barrels(); ++i) {
+            const Vec2 toAim = aim - origin;
+            if (toAim.LengthSq() <= 0.0f) return false;
+            volleyAngle_ = AngleOf(toAim);
+            volleyDistance_ = distance;
+            Launch(world, origin, volleyAngle_, volleyDistance_, 0);
+            return true;
+        }
+
+    private:
+        // shot 番目の砲の1発を撃つ（扇形の中で、その砲の向きにずらす）
+        void Launch(World& world, const Vec2& origin, float centerAngle, float distance, int shot) {
+            const Vec2 dir = Vec2::FromAngle(centerAngle + DegreesToRadians(BarrelOffset(shot, Barrels(), Config::ShellFanDegrees)));
+            {
                 Shell s;
-                s.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(i, Barrels(), Config::ShellBarrelSpacing);
+                s.pos = origin + dir * Config::CoreRadius;
                 s.vel = dir * Config::ShellSpeed;
                 s.distanceLeft = distance - Config::CoreRadius;
                 s.damageScale = PowerScale(Config::ShellPartPowerRate);
@@ -282,8 +378,10 @@ namespace {
                 s.fragmentCount = Config::ShellFragmentCount + Config::ShellFragmentsPerPart * CountPart(PartKind::Fragments);
                 world.AddShell(s);
             }
-            return true;
         }
+
+        float volleyAngle_ = 0.0f;
+        float volleyDistance_ = 0.0f;
     };
 
     int BaseEnergy(WeaponVariant v) {

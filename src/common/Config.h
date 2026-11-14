@@ -29,6 +29,8 @@ namespace Config {
     constexpr float RapidGunBulletSpeed = 600.0f; // 弾の速さ（ドット/秒）
     constexpr float RapidGunDamage = 1.0f;
     constexpr float RapidGunSpreadDegrees = 2.0f; // 狙いからずれる最大の角度（度）
+    constexpr float RapidTurnDegrees = 360.0f;    // 砲が1秒間に旋回できる角度（度）
+    constexpr float RapidTurretLength = 12.0f;    // コアの上に描く砲身の長さ（コアのふちから）
     constexpr float PlayerBulletRadius = 3.0f;
     constexpr int RapidGunEnergy = 1;
 
@@ -76,7 +78,7 @@ namespace Config {
     constexpr float RapidSweepDegrees = 30.0f;       // 速射砲 弾幕型・攻撃型：扇形に往復する幅（片側の角度）
     constexpr float RapidSweepSpeedDegrees = 120.0f; // 往復する速さ（度/秒）
     constexpr float RapidCloseInterval = 0.05f;      // 速射砲 近接防御型：撃つ間隔
-    constexpr float RapidCloseRange = 150.0f;        // 速射砲 近接防御型：射程（これより遠くには撃たない）
+    constexpr float RapidCloseRange = 150.0f;        // 速射砲 近接防御型：この距離に何か入ったら撃ち始め、いなくなったらやめる
     constexpr int RapidBarrageEnergy = 2;
     constexpr int RapidAttackEnergy = 2;
     constexpr int RapidCloseEnergy = 2;
@@ -93,10 +95,12 @@ namespace Config {
 
     // 連装型
     constexpr float MultiBarrelEnergyRate = 0.8f;    // エネルギー＝元のエネルギー×門数×この割合（四捨五入、最低でも元＋1）
-    constexpr float RapidBarrelSpacing = 8.0f;       // 並べた砲の間隔（ドット）
-    constexpr float BeamBarrelSpacing = 10.0f;
-    constexpr float ShellBarrelSpacing = 12.0f;
-    constexpr float MissileBarrelSpreadDegrees = 10.0f; // 誘導兵器：撃ち出す向きを1門ごとにずらす角度
+    constexpr float RapidBarrelSpacing = 8.0f;       // 速射砲：並べた砲の間隔（ドット）
+    constexpr float BeamBarrelSpacing = 10.0f;       // ビーム砲：並べた砲の間隔（ドット）
+    constexpr float BeamVolleyGap = 0.05f;           // ビーム砲：一斉射で1門ずつずらす時間（秒）
+    constexpr float MissileVolleyGap = 0.08f;        // 誘導兵器：一斉射で1門ずつずらす時間（秒）
+    constexpr float ShellVolleyGap = 0.1f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）
+    constexpr float ShellFanDegrees = 8.0f;          // 炸裂弾：扇形で1門ごとに向きを変える角度
 
     // 開始時のエネルギー上限
     constexpr int StartEnergy = 3;
