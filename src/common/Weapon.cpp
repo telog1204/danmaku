@@ -36,6 +36,9 @@ namespace {
 
     float AngleOf(const Vec2& v) { return std::atan2(v.y, v.x); }
 
+    // 射程の制限なし（距離に関係なく最も近いものを探す）
+    constexpr float NoRange = 1.0e9f;
+
     // 連装型で砲を並べたときの、i 番目の砲の横へのずれ（中央が0）
     float BarrelOffset(int i, int barrels, float spacing) {
         return (static_cast<float>(i) - (barrels - 1) * 0.5f) * spacing;
@@ -99,11 +102,12 @@ namespace {
             switch (Kind().variant) {
             case WeaponVariant::RapidBarrage:
             case WeaponVariant::RapidAttack: {
-                // 中心の向き（弾幕型は最も近い敵、攻撃型は敵が多い方向）を中心に、扇形に往復する
+                // 中心の向き（弾幕型は敵本体と敵の弾を区別せずに最も近いもの、攻撃型は敵が多い方向）を中心に、扇形に往復する
                 Vec2 center;
                 const bool crowd = Kind().variant == WeaponVariant::RapidAttack && world.FindCrowdCenter(center);
                 if (!crowd) {
-                    const Target target = world.FindNearestTarget(origin);
+                    const Target target = (Kind().variant == WeaponVariant::RapidBarrage) ? world.FindNearestAny(origin, NoRange)
+                                                                                           : world.FindNearestTarget(origin);
                     if (target.kind == TargetKind::None) return false;
                     center = target.pos;
                 }
@@ -117,7 +121,8 @@ namespace {
                 break;
             }
             default: {
-                const Target target = world.FindNearestTarget(origin);
+                // 基本型：敵本体と敵の弾を区別せずに、最も近いものを狙う
+                const Target target = world.FindNearestAny(origin, NoRange);
                 if (target.kind == TargetKind::None) return false;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
                 break;
@@ -205,7 +210,8 @@ namespace {
                 target = world.FindNearestAny(origin, Config::MissileCloseRange);
                 break;
             default:
-                target = world.FindNearestTarget(origin);
+                // 基本型：敵本体と敵の弾を区別せずに、最も近いものを狙う
+                target = world.FindNearestAny(origin, NoRange);
                 break;
             }
             if (target.kind == TargetKind::None) {
@@ -228,6 +234,8 @@ namespace {
                 m.turnDegrees = Config::MissileTurnDegrees *
                                 (1.0f + Config::MissileHomingRate * static_cast<float>(CountPart(PartKind::Homing)));
                 m.blastRadius = blast;
+                // 狙い直すときも、弾を含めて探すか（基本型・近接防御型）
+                m.targetsBullets = Kind().variant != WeaponVariant::MissileAttack;
                 world.AddMissile(m);
             }
             return true;
