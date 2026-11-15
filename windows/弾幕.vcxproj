@@ -171,6 +171,7 @@
     <ClInclude Include="..\src\common\Platform.h" />
     <ClInclude Include="..\src\common\GameLoop.h" />
     <ClInclude Include="..\src\common\Vec2.h" />
+    <ClInclude Include="..\src\common\Target.h" />
     <ClInclude Include="..\src\common\World.h" />
     <ClInclude Include="..\src\common\Weapon.h" />
     <ClInclude Include="..\src\common\EnemyAI.h" />

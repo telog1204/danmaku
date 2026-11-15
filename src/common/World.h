@@ -1,8 +1,10 @@
 #pragma once
+#include <functional>
 #include <memory>
 #include <random>
 #include <string>
 #include <vector>
+#include "Target.h"
 #include "Vec2.h"
 #include "Weapon.h"
 
@@ -40,24 +42,20 @@ struct Beam {
     Vec2 Tail() const;
 };
 
-// 狙う相手の種類
-enum class TargetKind {
-    None,
-    Enemy,
-    EnemyBullet,
-};
-
-// 誘導弾。撃ち出して一瞬まっすぐ進んでから、狙った相手を追いかける
+// 誘導弾。撃ち出してまっすぐ進んだあと（近接防御型はすぐに）、前方に見えている相手を自分で選んで追いかける。
+// 後ろ側は見えないので、相手を追い越すと見失い、前方の相手を選び直す
 struct Missile {
+    WeaponKind kind;            // 撃った武装の種類（同じ種類の誘導弾が同じ相手を狙いすぎないように数えるため）
     Vec2 pos;
     float heading = 0.0f;
     float age = 0.0f;
+    float straightSeconds = 0.0f; // 撃ち出してからまっすぐ進む時間（この間は相手を選ばない）
+    bool bodiesFirst = false;   // 敵本体を優先し、最も近いものを選ぶ（攻撃型）。そうでなければ近い順3つからランダム
     TargetKind targetKind = TargetKind::None;
     int targetId = 0;
     float damage = 0.0f;
     float turnDegrees = 0.0f;   // 1秒間に曲がれる角度
     float blastRadius = 0.0f;   // 消えるときの爆発の半径
-    bool targetsBullets = false; // 狙った相手がいなくなったとき、敵の弾も含めて最も近いものを狙い直すか
     bool alive = true;
 };
 
@@ -135,14 +133,6 @@ struct Enemy {
     float ramCooldown = 0.0f;  // 強敵：次に体当たりのダメージを与えるまでの時間
 };
 
-// 武装が狙う相手
-struct Target {
-    TargetKind kind = TargetKind::None;
-    int id = 0;
-    Vec2 pos;
-    Vec2 vel;
-};
-
 // ゲームの中身（コア・敵・弾）をまとめて持ち、時間を進める
 class World {
 public:
@@ -204,12 +194,18 @@ public:
     // 敵本体と敵の弾を区別せずに、from から maxRange 以内で最も近いものを探す（近接防御型）
     Target FindNearestAny(const Vec2& from, float maxRange) const;
     // HPが最も高い敵本体を探す（敵本体がいなければ、from に最も近い敵の弾）
-    Target FindHighestHpTarget(const Vec2& from) const;
+    // exclude にある相手は除く（除くと敵本体がいなくなるときは、除かずに選ぶ）
+    Target FindHighestHpTarget(const Vec2& from, const std::vector<Target>& exclude = {}) const;
     // from に近い順に、最大 count 個の相手を並べる（maxRange より遠いものは除く）。
     // bodiesFirst なら敵本体だけを並べ、本体がいないときだけ敵の弾を並べる。そうでなければ本体と弾を区別しない
-    std::vector<Target> FindNearestCandidates(const Vec2& from, float maxRange, bool bodiesFirst, size_t count) const;
-    // 近い順に3番目までの中から、ランダムに1つ選ぶ（ロックオンする相手を決める）
-    Target PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst);
+    // accept を渡したときは、それが true を返す相手だけを並べる
+    std::vector<Target> FindNearestCandidates(const Vec2& from, float maxRange, bool bodiesFirst, size_t count,
+                                              const std::function<bool(const Target&)>& accept = nullptr) const;
+    // 近い順に3番目までの中から、ランダムに1つ選ぶ（ロックオンする相手を決める）。
+    // exclude にある相手は候補から外す（外すと候補がなくなるときは、外さずに選ぶ）
+    Target PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude = {});
+    // self と同じ種類（派生版と連装の段階が同じ）のほかの武装が、今狙っている相手
+    std::vector<Target> TargetsOfSameKind(const Weapon* self) const;
     // 番号で相手を探す（もういなければ kind が None になる）
     Target FindTargetById(TargetKind kind, int id) const;
     // 敵が多い場所の中心（敵本体がいなければ false）
@@ -230,10 +226,13 @@ private:
     void MoveShells(float dt);
     void AgeExplosions(float dt);
     void MovePickups(float dt);
+    Target AcquireMissileTarget(const Missile& m);  // 誘導弾が、前方に見えている相手から狙う相手を選ぶ
+    bool MissileCanSee(const Missile& m, const Vec2& pos) const;
     void AgeMessages(float dt);
     void DropItems(const Enemy& e);
     std::vector<WeaponKind> WeaponCandidates() const;  // 落ちる候補になる武装（すべての単装＋持っている武装の1つ上の連装）
     bool Owns(const WeaponKind& kind) const;
+    void SortOwnedWeapons();  // 持っている武装を、系統 → 派生版 → 連装の順に並べる
     void MakeRewardChoices();
     void PlaceAtScreenEdge(Enemy& e);
     void AddMessage(const std::string& text, PickupKind kind);
