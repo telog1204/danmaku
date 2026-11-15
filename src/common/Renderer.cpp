@@ -19,46 +19,82 @@ namespace {
         DrawCircle(Px(core.pos.x), Px(core.pos.y), Px(core.radius + 6.0f), GetColor(40, 120, 160), FALSE, 2);
     }
 
+    // 機首の向きを指す三角（大きさ size、色 c）
+    void DrawArrow(const Enemy& e, float size, unsigned int c) {
+        const Vec2 f = Vec2::FromAngle(e.heading);
+        const Vec2 s = f.Perpendicular();
+        const Vec2 tip = e.pos + f * size * 1.3f;
+        const Vec2 left = e.pos - f * size + s * size;
+        const Vec2 right = e.pos - f * size - s * size;
+        DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), c, TRUE);
+    }
+
+    // 型ごとの形と色。区分によって大きさが変わる（重はふちを付け、大艦隊の旗艦は金色の輪を付ける）
     void DrawEnemy(const Enemy& e) {
         const int x = Px(e.pos.x);
         const int y = Px(e.pos.y);
         const int r = Px(e.radius);
         switch (e.type) {
-        case EnemyType::Charger: {
-            // 機首の向きを指す三角
-            const Vec2 f = Vec2::FromAngle(e.heading);
-            const Vec2 s = f.Perpendicular();
-            const Vec2 tip = e.pos + f * e.radius * 1.3f;
-            const Vec2 left = e.pos - f * e.radius + s * e.radius;
-            const Vec2 right = e.pos - f * e.radius - s * e.radius;
-            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(50, 10, 10), TRUE);
-            DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 70, 60), TRUE);
+        case EnemyType::Strafer:
+            // 離脱型：紫の矢じり
+            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(45, 10, 50), TRUE);
+            DrawArrow(e, e.radius, GetColor(230, 80, 255));
             break;
-        }
-        case EnemyType::Shooter:
-            // 四角
+        case EnemyType::Kamikaze:
+            // 自爆型：赤い矢じり
+            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(50, 10, 10), TRUE);
+            DrawArrow(e, e.radius, GetColor(255, 70, 60));
+            break;
+        case EnemyType::Gunship:
+            // 基本型：オレンジの四角
             DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(50, 30, 5), TRUE);
             DrawBox(x - r, y - r, x + r, y + r, GetColor(255, 160, 40), TRUE);
             break;
-        case EnemyType::Evader:
-            // ひし形（三角2つ）
-            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(45, 10, 50), TRUE);
-            DrawTriangle(x, y - r - 3, x - r, y, x + r, y, GetColor(230, 80, 255), TRUE);
-            DrawTriangle(x, y + r + 3, x - r, y, x + r, y, GetColor(230, 80, 255), TRUE);
+        case EnemyType::Torpedo:
+            // 雷撃型：緑の四角に、機首の向きを指す線
+            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(10, 45, 25), TRUE);
+            DrawBox(x - r, y - r, x + r, y + r, GetColor(80, 220, 130), TRUE);
+            {
+                const Vec2 tip = e.pos + Vec2::FromAngle(e.heading) * (e.radius * 1.6f);
+                DrawLine(x, y, Px(tip.x), Px(tip.y), GetColor(160, 255, 190), 3);
+            }
             break;
-        case EnemyType::Boss:
-            // 大きな四角（重装型を大きくした形）。HPは画面の上に出すので、ここでは出さない
-            DrawCircle(x, y, Px(e.radius * 1.9f), GetColor(58, 16, 16), TRUE);
-            DrawBox(x - r, y - r, x + r, y + r, GetColor(255, 176, 144), TRUE);
-            DrawBox(x - r + 4, y - r + 4, x + r - 4, y + r - 4, GetColor(255, 90, 60), TRUE);
-            return;
+        case EnemyType::Carrier:
+            // 空母型：青い横長の板（機首の向きに長い）
+            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(10, 25, 55), TRUE);
+            {
+                const Vec2 f = Vec2::FromAngle(e.heading) * (e.radius * 1.4f);
+                const Vec2 s = Vec2::FromAngle(e.heading).Perpendicular() * (e.radius * 0.7f);
+                const Vec2 a = e.pos + f + s, b = e.pos + f - s, c = e.pos - f - s, d = e.pos - f + s;
+                const unsigned int col = GetColor(90, 150, 255);
+                DrawTriangle(Px(a.x), Px(a.y), Px(b.x), Px(b.y), Px(c.x), Px(c.y), col, TRUE);
+                DrawTriangle(Px(a.x), Px(a.y), Px(c.x), Px(c.y), Px(d.x), Px(d.y), col, TRUE);
+            }
+            break;
         }
-        // HPが減っていたら、残りを細い線で出す
-        if (e.hp < e.maxHp) {
+        if (e.cls == EnemyClass::Heavy) {
+            DrawCircle(x, y, Px(e.radius * 1.5f), GetColor(200, 200, 220), FALSE, 2);
+        }
+        if (e.grandFlagship) {
+            DrawCircle(x, y, Px(e.radius * 1.9f), GetColor(255, 210, 80), FALSE, 2);
+        }
+        // HPが減っていたら、残りを細い線で出す（大艦隊の旗艦は画面の上に出すので出さない）
+        if (e.hp < e.maxHp && !e.grandFlagship && e.cls != EnemyClass::Light) {
             const int w = r * 2;
             const int filled = static_cast<int>(w * std::max(0.0f, e.hp) / e.maxHp);
             DrawBox(x - r, y - r - 7, x - r + filled, y - r - 5, GetColor(120, 255, 120), TRUE);
         }
+    }
+
+    // 敵の誘導弾：進む向きを指す細長い三角
+    void DrawEnemyMissile(const Bullet& b) {
+        const Vec2 f = b.vel.Normalized();
+        const Vec2 s = f.Perpendicular();
+        const Vec2 tip = b.pos + f * 8.0f;
+        const Vec2 left = b.pos - f * 5.0f + s * 3.5f;
+        const Vec2 right = b.pos - f * 5.0f - s * 3.5f;
+        DrawCircle(Px(b.pos.x), Px(b.pos.y), 9, GetColor(60, 15, 30), TRUE);
+        DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 110, 150), TRUE);
     }
 
     void DrawHud(const World& world) {
@@ -73,19 +109,18 @@ namespace {
         DrawFormatString(barX, barY + 14, GetColor(255, 255, 255), "HP %d / %d", core.hp, core.maxHp);
         DrawFormatString(540, barY, GetColor(255, 255, 255), "TIME %6.1f", world.ElapsedSeconds());
 
-        // 強敵のHP（画面の上の中央）。現れる少し前は「強敵接近」を点滅させる
-        if (const Enemy* boss = world.FindBoss()) {
+        // 大艦隊の旗艦の残りHP（画面の上の中央）。現れる少し前は「大艦隊接近」を点滅させる
+        if (world.IsGrandFleetActive()) {
             const int bx = 250;
             const int by = 78;
             const int bw = 300;
-            const char* label = "強敵";
+            const char* label = "大艦隊";
             DrawString((Config::ScreenWidth - GetDrawStringWidth(label, static_cast<int>(std::strlen(label)))) / 2, 58,
-                       label, GetColor(255, 154, 154));
-            DrawBox(bx, by, bx + bw, by + 10, GetColor(60, 30, 30), TRUE);
-            DrawBox(bx, by, bx + static_cast<int>(bw * std::max(0.0f, boss->hp) / boss->maxHp), by + 10,
-                    GetColor(255, 80, 80), TRUE);
-        } else if (world.IsBossWarning() && static_cast<int>(world.ElapsedSeconds() * 4.0f) % 2 == 0) {
-            const char* label = "強敵接近";
+                       label, GetColor(255, 210, 120));
+            DrawBox(bx, by, bx + bw, by + 10, GetColor(60, 45, 20), TRUE);
+            DrawBox(bx, by, bx + static_cast<int>(bw * world.GrandFleetHpRatio()), by + 10, GetColor(255, 190, 70), TRUE);
+        } else if (world.IsGrandFleetWarning() && static_cast<int>(world.ElapsedSeconds() * 4.0f) % 2 == 0) {
+            const char* label = "大艦隊接近";
             DrawString((Config::ScreenWidth - GetDrawStringWidth(label, static_cast<int>(std::strlen(label)))) / 2, 64,
                        label, GetColor(255, 90, 90));
         }
@@ -216,7 +251,11 @@ void DrawWorld(const World& world) {
         DrawPickup(p);
     }
     for (const Bullet& b : world.EnemyBullets()) {
-        DrawGlowCircle(b.pos, b.radius, 255, 90, 160);
+        if (b.homing) {
+            DrawEnemyMissile(b);
+        } else {
+            DrawGlowCircle(b.pos, b.radius, 255, 90, 160);
+        }
     }
     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 

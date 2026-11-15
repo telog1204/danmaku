@@ -108,9 +108,10 @@ void World::Reset() {
     pickups_.clear();
     messages_.clear();
     rewardChoices_.clear();
-    bossTimer_ = Config::BossInterval;
+    pendingEnemies_.clear();
+    grandFleetTimer_ = Config::GrandFleetInterval;
     kills_ = 0;
-    bossKills_ = 0;
+    fleetKills_ = 0;
     nextId_ = 1;
     elapsed_ = 0.0f;
     spawnTimer_ = 0.0f;
@@ -184,8 +185,9 @@ void World::DetachPart(size_t weaponIndex, PartKind part) {
 void World::Collect(const Pickup& pickup) {
     switch (pickup.kind) {
     case PickupKind::Energy: {
-        ++energyCap_;
-        AddMessage("エネルギー上限が1増えた（上限 " + std::to_string(energyCap_) + "）", pickup.kind);
+        energyCap_ += Config::EnergyPerUnlock;
+        AddMessage("エネルギー上限が" + std::to_string(Config::EnergyPerUnlock) + "増えた（上限 " + std::to_string(energyCap_) + "）",
+                   pickup.kind);
         break;
     }
     case PickupKind::Weapon:
@@ -470,11 +472,11 @@ void World::Step(float dt) {
                                Config::SpawnIntervalStart - elapsed_ * Config::SpawnIntervalShrinkPerSecond);
     }
 
-    // 強敵は、強敵がいない時間が一定続くと現れる（1体いる間は次は現れない）
-    if (FindBoss() == nullptr) {
-        bossTimer_ -= dt;
-        if (bossTimer_ <= 0.0f) {
-            SpawnBoss();
+    // 大艦隊は、大艦隊がいない時間が一定続くと現れる（旗艦が残っている間は次は現れない）
+    if (!IsGrandFleetActive()) {
+        grandFleetTimer_ -= dt;
+        if (grandFleetTimer_ <= 0.0f) {
+            SpawnGrandFleet();
         }
     }
 
@@ -482,13 +484,17 @@ void World::Step(float dt) {
         w->Update(*this, dt);
     }
 
-    // 敵が撃つと enemyBullets_ が増えるだけで enemies_ は変わらないので、参照のまま回してよい
+    // 敵の動きの途中で生み出された敵（空母型）は pendingEnemies_ にためておき、動きの処理が終わってから加える
     for (Enemy& e : enemies_) {
         UpdateEnemy(e, *this, dt);
     }
+    for (const Enemy& e : pendingEnemies_) {
+        enemies_.push_back(e);
+    }
+    pendingEnemies_.clear();
 
     MoveBullets(playerBullets_, dt);
-    MoveBullets(enemyBullets_, dt);
+    MoveEnemyBullets(dt);
     MoveBeams(dt);
     MoveMissiles(dt);
     MoveShells(dt);
@@ -505,88 +511,206 @@ void World::Step(float dt) {
     }
 }
 
+namespace {
+    float Lerp(float a, float b, float t) { return a + (b - a) * std::max(0.0f, std::min(1.0f, t)); }
+}
+
 void World::SpawnEnemy() {
-    Enemy e;
-    e.id = nextId_++;
-    const int kind = std::uniform_int_distribution<int>(0, 2)(rng_);
-    float baseHp = 0.0f;
-    switch (kind) {
-    case 0:
-        e.type = EnemyType::Charger;
-        e.radius = Config::ChargerRadius;
-        e.speed = Config::ChargerSpeed;
-        baseHp = static_cast<float>(Config::ChargerHp);
-        break;
-    case 1:
-        e.type = EnemyType::Shooter;
-        e.radius = Config::ShooterRadius;
-        e.speed = Config::ShooterSpeed;
-        baseHp = static_cast<float>(Config::ShooterHp);
-        e.shotTimer = RandomRange(0.5f, Config::ShooterShotInterval);
-        break;
-    default:
-        e.type = EnemyType::Evader;
-        e.radius = Config::EvaderRadius;
-        e.speed = Config::EvaderSpeed;
-        baseHp = static_cast<float>(Config::EvaderHp);
-        e.shotTimer = RandomRange(0.5f, Config::EvaderShotInterval);
-        break;
+    // 軽の群れか中を選ぶ（時間が経つほど中が増える）。中の基本型・雷撃型は、ある確率で艦隊になる
+    const float t = elapsed_ / Config::RampSeconds;
+    const float lightW = Lerp(Config::LightGroupWeightStart, Config::LightGroupWeightEnd, t);
+    const float mediumW = Lerp(Config::MediumWeightStart, Config::MediumWeightEnd, t);
+    if (RandomRange(0.0f, lightW + mediumW) < lightW) {
+        // 軽の群れ：同じ型が3〜5体まとまって
+        const EnemyType type = (std::uniform_int_distribution<int>(0, 1)(rng_) == 0) ? EnemyType::Strafer : EnemyType::Kamikaze;
+        const int count = std::uniform_int_distribution<int>(Config::LightGroupMin, Config::LightGroupMax)(rng_);
+        SpawnGroupAtEdge(EnemyClass::Light, std::vector<EnemyType>(static_cast<size_t>(count), type));
+        return;
     }
-    // 時間が経つほどHPが増える
-    e.maxHp = baseHp * (1.0f + elapsed_ / Config::EnemyHpGrowthSeconds);
-    e.hp = e.maxHp;
-    PlaceAtScreenEdge(e);
-    enemies_.push_back(e);
+    static const EnemyType mediumTypes[] = { EnemyType::Gunship, EnemyType::Torpedo, EnemyType::Carrier };
+    const EnemyType type = mediumTypes[std::uniform_int_distribution<int>(0, 2)(rng_)];
+    if (type != EnemyType::Carrier && RandomRange(0.0f, 1.0f) < Lerp(Config::FleetChanceStart, Config::FleetChanceEnd, t)) {
+        // 艦隊：旗艦（重）1体と、中の基本型・雷撃型3体
+        std::vector<EnemyType> escorts;
+        for (int i = 0; i < Config::FleetEscorts; ++i) {
+            escorts.push_back((std::uniform_int_distribution<int>(0, 1)(rng_) == 0) ? EnemyType::Gunship : EnemyType::Torpedo);
+        }
+        Vec2 outward;
+        const Vec2 base = RandomEdgePoint(outward);
+        SpawnEnemyAt(EnemyClass::Heavy, mediumTypes[std::uniform_int_distribution<int>(0, 2)(rng_)], base);
+        const Vec2 side = outward.Perpendicular();
+        for (size_t i = 0; i < escorts.size(); ++i) {
+            const float offset = (static_cast<float>(i) - (escorts.size() - 1) * 0.5f) * Config::GroupSpread * 2.0f;
+            SpawnEnemyAt(EnemyClass::Medium, escorts[i], base + side * offset + outward * Config::GroupSpread * 1.5f);
+        }
+        return;
+    }
+    SpawnGroupAtEdge(EnemyClass::Medium, { type });
 }
 
-void World::SpawnBoss() {
-    Enemy e;
-    e.id = nextId_++;
-    e.type = EnemyType::Boss;
-    e.radius = Config::BossRadius;
-    e.speed = Config::BossSpeed;
-    e.maxHp = Config::BossHp * (1.0f + elapsed_ / Config::EnemyHpGrowthSeconds);
-    e.hp = e.maxHp;
-    e.shotTimer = Config::BossShotInterval;
-    PlaceAtScreenEdge(e);
-    enemies_.push_back(e);
-    bossTimer_ = Config::BossInterval;
-}
-
-void World::PlaceAtScreenEdge(Enemy& e) {
-    e.orbitDir = (std::uniform_int_distribution<int>(0, 1)(rng_) == 0) ? 1.0f : -1.0f;
-
-    // 画面の四辺のどこかの、少し外側に置く
+Vec2 World::RandomEdgePoint(Vec2& outward) {
+    // 画面の四辺のどこかの、少し外側の点（outward は画面の外へ向かう向き）
     const float w = static_cast<float>(Config::ScreenWidth);
     const float h = static_cast<float>(Config::ScreenHeight);
     const float m = Config::SpawnMargin;
     const float t = RandomRange(0.0f, 2.0f * (w + h));
     if (t < w) {
-        e.pos = Vec2(t, -m);
-    } else if (t < w + h) {
-        e.pos = Vec2(w + m, t - w);
-    } else if (t < 2.0f * w + h) {
-        e.pos = Vec2(t - (w + h), h + m);
-    } else {
-        e.pos = Vec2(-m, t - (2.0f * w + h));
+        outward = Vec2(0.0f, -1.0f);
+        return Vec2(t, -m);
     }
+    if (t < w + h) {
+        outward = Vec2(1.0f, 0.0f);
+        return Vec2(w + m, t - w);
+    }
+    if (t < 2.0f * w + h) {
+        outward = Vec2(0.0f, 1.0f);
+        return Vec2(t - (w + h), h + m);
+    }
+    outward = Vec2(-1.0f, 0.0f);
+    return Vec2(-m, t - (2.0f * w + h));
+}
+
+void World::SpawnGroupAtEdge(EnemyClass cls, const std::vector<EnemyType>& types) {
+    // 1か所からまとまって現れる（辺に沿って少しずつずらし、外側へ少し重ねる）
+    Vec2 outward;
+    const Vec2 base = RandomEdgePoint(outward);
+    const Vec2 side = outward.Perpendicular();
+    for (size_t i = 0; i < types.size(); ++i) {
+        const float offset = (static_cast<float>(i) - (types.size() - 1) * 0.5f) * Config::GroupSpread;
+        const Vec2 jitter = outward * RandomRange(0.0f, Config::GroupSpread);
+        SpawnEnemyAt(cls, types[i], base + side * offset + jitter);
+    }
+}
+
+Enemy& World::SpawnEnemyAt(EnemyClass cls, EnemyType type, const Vec2& pos) {
+    Enemy e;
+    e.id = nextId_++;
+    e.cls = cls;
+    e.type = type;
+    e.pos = pos;
+    // 時間が経つほどHPが増える（軽は増えない）
+    const float hpScale = 1.0f + elapsed_ / Config::EnemyHpGrowthSeconds;
+    switch (cls) {
+    case EnemyClass::Light:
+        e.radius = Config::LightRadius;
+        e.cruiseSpeed = Config::LightSpeed;
+        e.turnDegrees = Config::LightTurnDegrees;
+        e.maxHp = 1.0f;
+        e.defense = 0.0f;
+        break;
+    case EnemyClass::Medium:
+        e.radius = Config::MediumRadius;
+        e.cruiseSpeed = Config::MediumSpeed;
+        e.turnDegrees = Config::MediumTurnDegrees;
+        e.maxHp = Config::MediumHp * hpScale;
+        e.defense = Config::MediumDefense;
+        break;
+    case EnemyClass::Heavy:
+        e.radius = Config::HeavyRadius;
+        e.cruiseSpeed = Config::HeavySpeed;
+        e.turnDegrees = Config::HeavyTurnDegrees;
+        e.maxHp = Config::HeavyHp * hpScale;
+        e.defense = Config::HeavyDefense;
+        break;
+    }
+    e.hp = e.maxHp;
+    e.speed = e.cruiseSpeed;
+    e.orbitDir = (std::uniform_int_distribution<int>(0, 1)(rng_) == 0) ? 1.0f : -1.0f;
+    e.shotTimer = RandomRange(0.5f, 1.5f);
     // 最初はコアの方へ機首を向けて現れる
     const Vec2 toCore = core_.pos - e.pos;
     e.heading = std::atan2(toCore.y, toCore.x);
     e.vel = Vec2::FromAngle(e.heading) * e.speed;
+    pendingEnemies_.push_back(e);
+    return pendingEnemies_.back();
 }
 
-const Enemy* World::FindBoss() const {
+void World::LaunchLightGroup(const Enemy& carrier, int count) {
+    // 空母型の位置から、同じ型の軽の敵をまとめて生み出す
+    const EnemyType type = (std::uniform_int_distribution<int>(0, 1)(rng_) == 0) ? EnemyType::Strafer : EnemyType::Kamikaze;
+    for (int i = 0; i < count; ++i) {
+        const Vec2 offset = Vec2::FromAngle(RandomRange(0.0f, 6.2831853f)) * RandomRange(0.0f, carrier.radius);
+        Enemy& e = SpawnEnemyAt(EnemyClass::Light, type, carrier.pos + offset);
+        e.parentId = carrier.id;
+        e.entered = carrier.entered;
+    }
+}
+
+int World::CountChildren(int parentId) const {
+    int n = 0;
     for (const Enemy& e : enemies_) {
-        if (e.alive && e.type == EnemyType::Boss) {
-            return &e;
+        if (e.alive && e.parentId == parentId) ++n;
+    }
+    for (const Enemy& e : pendingEnemies_) {
+        if (e.alive && e.parentId == parentId) ++n;
+    }
+    return n;
+}
+
+void World::FireEnemyMissile(const Vec2& pos, float heading) {
+    Bullet b;
+    b.id = nextId_++;
+    b.pos = pos;
+    b.vel = Vec2::FromAngle(heading) * Config::EnemyMissileSpeed;
+    b.radius = Config::EnemyMissileRadius;
+    b.damage = static_cast<float>(Config::EnemyMissileDamage);
+    b.life = Config::EnemyMissileLifeSeconds;
+    b.homing = true;
+    enemyBullets_.push_back(b);
+}
+
+void World::SpawnGrandFleet() {
+    // 大艦隊：旗艦（重）と、中の基本型・雷撃型が、1つの辺からまとまって現れる
+    static const EnemyType heavyTypes[] = { EnemyType::Gunship, EnemyType::Torpedo, EnemyType::Carrier };
+    Vec2 outward;
+    const Vec2 base = RandomEdgePoint(outward);
+    const Vec2 side = outward.Perpendicular();
+    for (int i = 0; i < Config::GrandFleetFlagships; ++i) {
+        const float offset = (static_cast<float>(i) - (Config::GrandFleetFlagships - 1) * 0.5f) * Config::GroupSpread * 3.0f;
+        Enemy& e = SpawnEnemyAt(EnemyClass::Heavy, heavyTypes[std::uniform_int_distribution<int>(0, 2)(rng_)],
+                                base + side * offset);
+        e.grandFlagship = true;
+    }
+    for (int i = 0; i < Config::GrandFleetEscorts; ++i) {
+        const float offset = (static_cast<float>(i) - (Config::GrandFleetEscorts - 1) * 0.5f) * Config::GroupSpread * 2.0f;
+        const EnemyType type = (std::uniform_int_distribution<int>(0, 1)(rng_) == 0) ? EnemyType::Gunship : EnemyType::Torpedo;
+        SpawnEnemyAt(EnemyClass::Medium, type, base + side * offset + outward * Config::GroupSpread * 2.0f);
+    }
+    grandFleetTimer_ = Config::GrandFleetInterval;
+}
+
+bool World::IsGrandFleetActive() const {
+    for (const Enemy& e : enemies_) {
+        if (e.alive && e.grandFlagship) return true;
+    }
+    for (const Enemy& e : pendingEnemies_) {
+        if (e.alive && e.grandFlagship) return true;
+    }
+    return false;
+}
+
+bool World::IsGrandFleetWarning() const {
+    return !IsGrandFleetActive() && grandFleetTimer_ <= Config::GrandFleetWarningSeconds;
+}
+
+float World::GrandFleetHpRatio() const {
+    float hp = 0.0f;
+    float maxHp = 0.0f;
+    for (const Enemy& e : enemies_) {
+        if (e.grandFlagship) {
+            hp += e.alive ? std::max(0.0f, e.hp) : 0.0f;
+            maxHp += e.maxHp;
         }
     }
-    return nullptr;
+    return maxHp > 0.0f ? hp / maxHp : 0.0f;
 }
 
-bool World::IsBossWarning() const {
-    return FindBoss() == nullptr && bossTimer_ <= Config::BossWarningSeconds;
+void World::CheckGrandFleetDefeated() {
+    // 旗艦が全部いなくなったら、報酬を選べる
+    if (!IsGrandFleetActive()) {
+        ++fleetKills_;
+        MakeRewardChoices();
+    }
 }
 
 void World::MakeRewardChoices() {
@@ -651,6 +775,19 @@ void World::MoveBullets(std::vector<Bullet>& bullets, float dt) {
             b.alive = false;
         }
     }
+}
+
+void World::MoveEnemyBullets(float dt) {
+    // 敵の誘導弾は、コアのほうへ曲がりながら飛ぶ（ほかの敵の弾はまっすぐ）
+    const float maxTurn = Config::EnemyMissileTurnDegrees * Pi / 180.0f * dt;
+    for (Bullet& b : enemyBullets_) {
+        if (!b.homing) continue;
+        const float heading = std::atan2(b.vel.y, b.vel.x);
+        const Vec2 to = core_.pos - b.pos;
+        const float diff = WrapAngle(std::atan2(to.y, to.x) - heading);
+        b.vel = Vec2::FromAngle(heading + std::max(-maxTurn, std::min(maxTurn, diff))) * Config::EnemyMissileSpeed;
+    }
+    MoveBullets(enemyBullets_, dt);
 }
 
 void World::MoveBeams(float dt) {
@@ -783,7 +920,11 @@ void World::AgeMessages(float dt) {
 
 void World::DropItems(const Enemy& e) {
     // 見えない経験値がたまったら、エネルギー上限解放パーツを落とす
-    exp_ += (e.type == EnemyType::Evader) ? Config::EvaderExp : 1;
+    switch (e.cls) {
+    case EnemyClass::Light: exp_ += Config::LightExp; break;
+    case EnemyClass::Medium: exp_ += Config::MediumExp; break;
+    case EnemyClass::Heavy: exp_ += Config::HeavyExp; break;
+    }
     while (exp_ >= expNeed_) {
         exp_ -= expNeed_;
         expNeed_ += Config::ExpNeedGrowth;
@@ -845,18 +986,28 @@ void World::DamageEnemy(Enemy& e, float damage) {
     if (!e.alive) {
         return;
     }
-    e.hp -= damage;
+    // 受けるダメージ＝攻撃力−防御力（最低でも攻撃力の1割は通る）。軽はどの攻撃でも1発で倒れる
+    const float dealt = std::max(damage * Config::MinDamageRate, damage - e.defense);
+    e.hp -= (e.cls == EnemyClass::Light) ? e.hp : dealt;
     if (e.hp <= 0.0f) {
         e.alive = false;
-        if (e.type == EnemyType::Boss) {
-            // 強敵は落とし物を落とさず、代わりに報酬を選べる
-            ++bossKills_;
-            MakeRewardChoices();
+        if (e.grandFlagship) {
+            // 大艦隊の旗艦は落とし物を落とさず、全部倒すと報酬を選べる
+            CheckGrandFleetDefeated();
         } else {
             ++kills_;
             DropItems(e);
         }
     }
+}
+
+void World::DestroyEnemyBullet(Bullet& b) {
+    if (!b.alive) {
+        return;
+    }
+    // 自分の攻撃で壊された敵の弾は、小さな爆発を起こして、周りの敵・敵の弾・誘導弾を巻き込む（連鎖する）
+    b.alive = false;
+    AddExplosion(b.pos, Config::EnemyBulletBlastRadius, Config::EnemyBulletBlastDamage, Config::EnemyBulletBlastSeconds);
 }
 
 bool World::HitWithBullet(Bullet& b, int targetId) {
@@ -913,7 +1064,7 @@ void World::HandleCollisions() {
         if (!pb.alive) continue;
         for (Bullet& eb : enemyBullets_) {
             if (eb.alive && Overlaps(pb.pos, pb.radius, eb.pos, eb.radius)) {
-                eb.alive = false;
+                DestroyEnemyBullet(eb);
                 if (!HitWithBullet(pb, eb.id)) break;
             }
         }
@@ -934,7 +1085,7 @@ void World::HandleCollisions() {
             if (!eb.alive) continue;
             const float r = eb.radius + Config::BeamHalfWidth;
             if (DistanceSqToSegment(eb.pos, tail, b.pos) <= r * r) {
-                eb.alive = false;
+                DestroyEnemyBullet(eb);
                 b.damage *= b.decay;
             }
         }
@@ -962,7 +1113,7 @@ void World::HandleCollisions() {
         if (!m.alive) continue;
         for (Bullet& eb : enemyBullets_) {
             if (eb.alive && Overlaps(m.pos, Config::MissileRadius, eb.pos, eb.radius)) {
-                eb.alive = false;
+                DestroyEnemyBullet(eb);
                 DetonateMissile(m);
                 break;
             }
@@ -982,7 +1133,7 @@ void World::HandleCollisions() {
         if (!s.alive) continue;
         for (Bullet& eb : enemyBullets_) {
             if (eb.alive && Overlaps(s.pos, Config::ShellRadius, eb.pos, eb.radius)) {
-                eb.alive = false;
+                DestroyEnemyBullet(eb);
                 BurstShell(s);
                 break;
             }
@@ -992,12 +1143,16 @@ void World::HandleCollisions() {
     // 爆発・爆炎：残っているあいだ、触れた敵（1体につき1回）・敵の弾・誘導弾を巻き込む。
     // 巻き込まれた誘導弾が起こす爆発も、同じフレームのうちに次々と広がる（誘爆）
     // 残っている爆炎も毎回判定するので、新しい爆発がなくても1回は回す
+    // 1回目はすべての爆発を、2回目からは新しく起きた爆発だけを判定する（連鎖が長く続いても重くならないように）
+    size_t firstNew = 0;
     do {
         for (Explosion& x : pendingExplosions_) {
             explosions_.push_back(x);
         }
         pendingExplosions_.clear();
-        for (Explosion& x : explosions_) {
+        const size_t end = explosions_.size();
+        for (size_t xi = firstNew; xi < end; ++xi) {
+            Explosion& x = explosions_[xi];
             if (!x.alive) continue;
             for (Enemy& e : enemies_) {
                 if (e.alive && !Contains(x.hitIds, e.id) && Overlaps(x.pos, x.radius, e.pos, e.radius)) {
@@ -1007,7 +1162,7 @@ void World::HandleCollisions() {
             }
             for (Bullet& eb : enemyBullets_) {
                 if (eb.alive && Overlaps(x.pos, x.radius, eb.pos, eb.radius)) {
-                    eb.alive = false;
+                    DestroyEnemyBullet(eb);
                 }
             }
             for (Missile& m : missiles_) {
@@ -1016,6 +1171,7 @@ void World::HandleCollisions() {
                 }
             }
         }
+        firstNew = end;
     } while (!pendingExplosions_.empty());
 
     // 敵の弾がコアに当たる
@@ -1026,17 +1182,13 @@ void World::HandleCollisions() {
         }
     }
 
-    // 敵本体がコアにぶつかる（体当たり）。ぶつかった敵は消える。強敵は消えず、少し間をおいて何度でもダメージを与える
+    // 敵本体がコアにぶつかる（体当たり）。ぶつかった敵は消える
     for (Enemy& e : enemies_) {
         if (e.alive && Overlaps(e.pos, e.radius, core_.pos, core_.radius)) {
-            if (e.type == EnemyType::Boss) {
-                if (e.ramCooldown <= 0.0f) {
-                    core_.hp -= Config::BossRamDamage;
-                    e.ramCooldown = Config::BossRamCooldown;
-                }
-            } else {
-                e.alive = false;
-                core_.hp -= Config::ChargerRamDamage;
+            e.alive = false;
+            core_.hp -= (e.type == EnemyType::Kamikaze) ? Config::KamikazeRamDamage : Config::RamDamage;
+            if (e.grandFlagship) {
+                CheckGrandFleetDefeated();
             }
         }
     }
