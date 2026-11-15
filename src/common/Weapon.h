@@ -94,10 +94,10 @@ public:
     bool RemovePart(PartKind part);
     int CountPart(PartKind part) const;
 
-    // 本体と強化パーツを合わせた消費エネルギー（強化パーツは1個目 +1、2個目 +2、3個目 +3…）
+    // 本体と強化パーツを合わせた消費エネルギー（強化パーツは1個目 +10、2個目 +20、3個目 +30…）
     int Energy() const;
     // もう1つ強化パーツを付けたときに増えるエネルギー
-    int NextPartEnergy() const { return static_cast<int>(parts_.size()) + 1; }
+    int NextPartEnergy() const;
 
 private:
     WeaponKind kind_;

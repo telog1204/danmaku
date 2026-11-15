@@ -24,6 +24,7 @@ struct Bullet {
     float radius = 0.0f;
     float damage = 0.0f;
     float life = -1.0f;  // 残りの飛ぶ時間（秒）。負なら画面の外へ出るまで飛ぶ
+    bool homing = false; // 敵の誘導弾：コアを追いかける
     float pierceChance = 0.0f; // 当たったときに貫く確率（速射砲の貫徹力強化）
     int lastHitId = 0;   // 最後に貫いた相手の番号（同じ相手に続けて当たらないように）
     bool alive = true;
@@ -107,16 +108,32 @@ struct Explosion {
     bool alive = true;
 };
 
+// 敵の区分。大きさ・HP・速さ・防御力などが決まる
+enum class EnemyClass {
+    Light,   // 軽：どの攻撃でも1発で倒せる。速く、まとまって現れ、弾をかわす
+    Medium,  // 中：遅く、防御力がある
+    Heavy,   // 重：とても遅く、硬い。艦隊の旗艦としてだけ現れる
+};
+
+// 敵の型。動き方と攻撃の仕方が決まる（軽は離脱型・自爆型、中・重は基本型・雷撃型・空母型）
 enum class EnemyType {
-    Charger,  // 突撃型
-    Shooter,  // 射撃型
-    Evader,   // 回避型
-    Boss,     // 強敵
+    Strafer,   // 離脱型（軽）：コアへ向かいながら撃ち、近づくと離れて、また向かってくる
+    Kamikaze,  // 自爆型（軽）：コアへ体当たりする
+    Gunship,   // 基本型（中・重）：遠めの円を旋回し、弾を撃ち続ける
+    Torpedo,   // 雷撃型（中・重）：遠めの円を旋回し、敵の誘導弾を撃つ
+    Carrier,   // 空母型（中・重）：遠めの円を旋回し、軽の敵を生み出す
 };
 
 struct Enemy {
     int id = 0;
-    EnemyType type = EnemyType::Charger;
+    EnemyClass cls = EnemyClass::Medium;
+    EnemyType type = EnemyType::Gunship;
+    float defense = 0.0f;      // 防御力（受けるダメージ＝攻撃力−防御力。最低でも1割は通る）
+    float cruiseSpeed = 0.0f;  // ふだんの速さ
+    float turnDegrees = 0.0f;  // 1秒間に曲がれる角度
+    bool grandFlagship = false; // 大艦隊の旗艦（全部倒すと報酬を選べる）
+    int parentId = 0;          // 空母型から生み出された軽の敵なら、その空母型の番号
+    bool leaving = false;      // 離脱型：コアから離れている途中か
     Vec2 pos;
     Vec2 vel;
     float radius = 0.0f;
@@ -128,9 +145,8 @@ struct Enemy {
     bool entered = false;      // 一度画面の中に入ったか（入ったあとは、画面の端で旋回して内側へ戻る）
     float shotTimer = 0.0f;    // 次に撃つまでの時間（秒）
     float orbitDir = 1.0f;     // コアの周りを回る向き（1：左回り、−1：右回り）
-    float reactionTimer = 0.0f; // 回避型：次に弾を見直すまでの時間（秒）
-    Vec2 dodgeDir;             // 回避型：当たりそうな弾から離れたい向き（当たりそうな弾がなければ長さ0）
-    float ramCooldown = 0.0f;  // 強敵：次に体当たりのダメージを与えるまでの時間
+    float reactionTimer = 0.0f; // 軽：次に弾を見直すまでの時間（秒）
+    Vec2 dodgeDir;             // 軽：当たりそうな弾から離れたい向き（当たりそうな弾がなければ長さ0）
 };
 
 // ゲームの中身（コア・敵・弾）をまとめて持ち、時間を進める
@@ -148,7 +164,7 @@ public:
     float ElapsedSeconds() const { return elapsed_; }
     float GameOverSeconds() const { return gameOverSeconds_; }
     int Kills() const { return kills_; }          // 倒した敵の数（強敵と、体当たりで消えた敵は含めない）
-    int BossKills() const { return bossKills_; }  // 倒した強敵の数
+    int FleetKills() const { return fleetKills_; }  // 倒した大艦隊の数（旗艦を全部倒した回数）
 
     const Core& GetCore() const { return core_; }
     const std::vector<Enemy>& Enemies() const { return enemies_; }
@@ -177,13 +193,20 @@ public:
     // 拾ったものを手に入れる（落とし物を拾ったときに呼ぶ。試験からも使う）
     void Collect(const Pickup& pickup);
 
-    // 強敵
-    const Enemy* FindBoss() const;               // 今いる強敵（いなければ nullptr）
-    bool IsBossWarning() const;                  // もうすぐ強敵が現れる（「強敵接近」を出す）
-    bool HasPendingReward() const { return !rewardChoices_.empty(); }  // 強敵を倒して、報酬を選ぶのを待っている
+    // 大艦隊
+    bool IsGrandFleetActive() const;             // 大艦隊の旗艦が残っている
+    bool IsGrandFleetWarning() const;            // もうすぐ大艦隊が現れる（「大艦隊接近」を出す）
+    float GrandFleetHpRatio() const;             // 大艦隊の旗艦の残りHPの割合（いなければ0）
+    bool HasPendingReward() const { return !rewardChoices_.empty(); }  // 大艦隊を倒して、報酬を選ぶのを待っている
     const std::vector<Pickup>& RewardChoices() const { return rewardChoices_; }
     void ChooseReward(size_t index);             // 報酬を1つ選んで手に入れる
-    void SpawnBoss();                            // 強敵を出す（時間で現れるほか、試験からも使う）
+    void SpawnGrandFleet();                      // 大艦隊を出す（時間で現れるほか、試験からも使う）
+
+    // 敵を出す（現れ方の処理と、空母型・試験から使う）
+    Enemy& SpawnEnemyAt(EnemyClass cls, EnemyType type, const Vec2& pos);
+    void LaunchLightGroup(const Enemy& carrier, int count);  // 空母型が軽の敵を生み出す
+    int CountChildren(int parentId) const;                   // 空母型から生み出されて、まだいる軽の敵の数
+    void FireEnemyMissile(const Vec2& pos, float heading);   // 雷撃型が敵の誘導弾を撃つ
 
     // 武装や敵の動きから使うもの
     std::mt19937& Rng() { return rng_; }
@@ -234,10 +257,14 @@ private:
     bool Owns(const WeaponKind& kind) const;
     void SortOwnedWeapons();  // 持っている武装を、系統 → 派生版 → 連装の順に並べる
     void MakeRewardChoices();
-    void PlaceAtScreenEdge(Enemy& e);
     void AddMessage(const std::string& text, PickupKind kind);
     void HandleCollisions();
     void DamageEnemy(Enemy& e, float damage);
+    void DestroyEnemyBullet(Bullet& b);  // 敵の弾を自分の攻撃で壊す（小さな爆発を起こす）
+    void MoveEnemyBullets(float dt);
+    void SpawnGroupAtEdge(EnemyClass cls, const std::vector<EnemyType>& types);
+    Vec2 RandomEdgePoint(Vec2& outward);
+    void CheckGrandFleetDefeated();
     void DetonateMissile(Missile& m);
     void BurstShell(Shell& s);
     void AddExplosion(const Vec2& pos, float radius, float damage, float seconds);
@@ -265,9 +292,10 @@ private:
     int nextId_ = 1;
     float elapsed_ = 0.0f;
     float spawnTimer_ = 0.0f;
-    float bossTimer_ = 0.0f;
+    float grandFleetTimer_ = 0.0f;  // 次の大艦隊が現れるまでの時間（大艦隊がいない間だけ減る）
+    std::vector<Enemy> pendingEnemies_;  // 敵の動きの途中で生み出された敵（動きの処理が終わってから加える）
     int kills_ = 0;
-    int bossKills_ = 0;  // 次の強敵が現れるまでの時間（強敵がいない間だけ減る）
+    int fleetKills_ = 0;  // 次の強敵が現れるまでの時間（強敵がいない間だけ減る）
     std::vector<Pickup> rewardChoices_;  // 強敵を倒したときの報酬の候補（選ぶまで空でない）
     bool gameOver_ = false;
     float gameOverSeconds_ = 0.0f;  // ゲームオーバーになってからの時間（やり直しの受け付けに使う）

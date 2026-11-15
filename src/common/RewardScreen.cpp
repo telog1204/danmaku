@@ -121,9 +121,9 @@ void RewardScreen::Draw(const World& world) const {
             fill = GetColor(58, 52, 32);
             border = GetColor(255, 215, 106);
             kindLabel = "エネルギー上限解放パーツ";
-            name = "エネルギー上限 +1";
-            desc = "エネルギーの上限が1増える。今の上限 " + std::to_string(world.EnergyCap()) + " → " +
-                   std::to_string(world.EnergyCap() + 1);
+            name = "エネルギー上限 +" + std::to_string(Config::EnergyPerUnlock);
+            desc = "エネルギーの上限が" + std::to_string(Config::EnergyPerUnlock) + "増える。今の上限 " +
+                   std::to_string(world.EnergyCap()) + " → " + std::to_string(world.EnergyCap() + Config::EnergyPerUnlock);
             break;
         }
         DrawBox(x, CardTop, x + CardW, CardTop + CardH, fill, TRUE);

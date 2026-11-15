@@ -71,7 +71,7 @@ void GameOverScreen::Draw(const World& world) const {
     DrawCentered(185, line, GetColor(255, 255, 255));
     std::snprintf(line, sizeof(line), "倒した敵　%d 体", world.Kills());
     DrawCentered(215, line, GetColor(255, 255, 255));
-    std::snprintf(line, sizeof(line), "倒した強敵　%d 体", world.BossKills());
+    std::snprintf(line, sizeof(line), "倒した大艦隊　%d", world.FleetKills());
     DrawCentered(245, line, GetColor(255, 255, 255));
     if (newRecord_) {
         DrawCentered(295, "★ 新記録！ ★", GetColor(255, 224, 96));

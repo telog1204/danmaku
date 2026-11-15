@@ -588,9 +588,13 @@ int Weapon::CountPart(PartKind part) const {
     return static_cast<int>(std::count(parts_.begin(), parts_.end(), part));
 }
 
+int Weapon::NextPartEnergy() const {
+    return Config::PartEnergyUnit * (static_cast<int>(parts_.size()) + 1);
+}
+
 int Weapon::Energy() const {
     const int n = static_cast<int>(parts_.size());
-    return WeaponEnergy(kind_) + n * (n + 1) / 2;
+    return WeaponEnergy(kind_) + Config::PartEnergyUnit * n * (n + 1) / 2;
 }
 
 WeaponFamily FamilyOf(WeaponVariant variant) {
@@ -719,15 +723,27 @@ std::string WeaponDescription(const WeaponKind& kind) {
 }
 
 int WeaponEnergy(const WeaponKind& kind) {
-    // 元のエネルギー×門数×割合（四捨五入）にして、少し安くする。
-    // ただし、連装の段階が1つ上がるごとに最低でも1は増やす（元のエネルギーが1のときは、門数分と同じになる）
-    const int base = BaseEnergy(kind.variant);
-    int energy = base;
+    // 連装型は、もとにする段階を2つ（三連装は単装を3つ）並べるより少し安くする。
+    //   連装＝単装×2×割合、三連装＝単装×3×割合、四連装＝連装×2×割合、八連装＝四連装×2×割合（四捨五入）
+    // ただし、段階が1つ上がるごとに最低でも1は増やす
+    const int single = BaseEnergy(kind.variant);
+    int energy = single;
+    int twin = single;
+    int quad = single;
     for (int barrels : BarrelSteps(FamilyOf(kind))) {
         if (barrels <= 1) continue;
         if (barrels > kind.barrels) break;
-        const int scaled = static_cast<int>(std::lround(base * barrels * Config::MultiBarrelEnergyRate));
-        energy = std::max(energy + 1, scaled);
+        float raw = 0.0f;
+        switch (barrels) {
+        case 2: raw = single * 2.0f; break;
+        case 3: raw = single * 3.0f; break;
+        case 4: raw = twin * 2.0f; break;
+        case 8: raw = quad * 2.0f; break;
+        default: raw = single * static_cast<float>(barrels); break;
+        }
+        energy = std::max(energy + 1, static_cast<int>(std::lround(raw * Config::MultiBarrelEnergyRate)));
+        if (barrels == 2) twin = energy;
+        if (barrels == 4) quad = energy;
     }
     return energy;
 }

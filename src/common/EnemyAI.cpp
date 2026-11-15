@@ -58,16 +58,16 @@ namespace {
             const Vec2 rel = e.pos - b.pos;
             // 弾が最も近づくまでの時間
             const float t = rel.Dot(relVel) / relSpeedSq;
-            if (t <= 0.0f || t > Config::EvaderLookAheadSeconds) continue;
+            if (t <= 0.0f || t > Config::DodgeLookAheadSeconds) continue;
             // 最も近づいたときの、弾から見た自分の位置
             const Vec2 closest = rel - relVel * t;
-            const float limit = e.radius + b.radius + Config::EvaderDodgeMargin;
+            const float limit = e.radius + b.radius + Config::DodgeMargin;
             const float dist = closest.Length();
             if (dist >= limit) continue;
             // 進路の真上にいるときは、進路に対して横へ逃げる
             const Vec2 away = dist > 0.001f ? closest * (1.0f / dist) : relVel.Perpendicular().Normalized();
             // 早く届く弾、進路の中心に近い弾ほど強く避ける
-            const float weight = (1.0f - t / Config::EvaderLookAheadSeconds) * (1.0f - dist / limit);
+            const float weight = (1.0f - t / Config::DodgeLookAheadSeconds) * (1.0f - dist / limit);
             push += away * weight;
         }
         return push.Normalized();
@@ -102,65 +102,128 @@ namespace {
         e.vel = Vec2::FromAngle(e.heading) * e.speed;
     }
 
-    void UpdateCharger(Enemy& e, World& world, float dt) {
-        const Vec2 desired = AvoidEdges(e, (world.GetCore().pos - e.pos).Normalized());
-        Steer(e, desired, Config::ChargerTurnDegrees, Config::ChargerSpeed, dt);
+    // 重の攻撃は、中より短い間隔で行う
+    float AttackInterval(const Enemy& e, float mediumInterval) {
+        return e.cls == EnemyClass::Heavy ? mediumInterval * Config::HeavyAttackIntervalRate : mediumInterval;
     }
 
-    void UpdateShooter(Enemy& e, World& world, float dt) {
-        const Vec2 desired = AvoidEdges(e, OrbitDirection(e, world.GetCore().pos, Config::ShooterKeepDistance));
-        Steer(e, desired, Config::ShooterTurnDegrees, Config::ShooterSpeed, dt);
-        ShootAtCore(e, world, dt, Config::ShooterShotInterval, Config::ShooterKeepDistance + 80.0f);
-    }
-
-    // 強敵：コアの周りをゆっくり旋回しながら、コアの方向へ扇形に弾をばらまく
-    void UpdateBoss(Enemy& e, World& world, float dt) {
-        const Vec2 desired = AvoidEdges(e, OrbitDirection(e, world.GetCore().pos, Config::BossKeepDistance));
-        Steer(e, desired, Config::BossTurnDegrees, Config::BossSpeed, dt);
-        if (e.ramCooldown > 0.0f) {
-            e.ramCooldown -= dt;
-        }
-        e.shotTimer -= dt;
-        if (e.shotTimer > 0.0f) {
+    // 軽の敵：当たりそうな弾を見て、かわす向きを決める（見直すのはばらつきのある間隔ごと。たまに見落とす）
+    void UpdateDodge(Enemy& e, World& world, float dt) {
+        e.reactionTimer -= dt;
+        if (e.reactionTimer > 0.0f) {
             return;
         }
-        e.shotTimer += Config::BossShotInterval;
+        e.reactionTimer = world.RandomRange(Config::DodgeReactionMin, Config::DodgeReactionMax);
+        if (world.RandomRange(0.0f, 1.0f) < Config::DodgeMissChance) {
+            e.dodgeDir = Vec2();
+        } else {
+            e.dodgeDir = DodgeDirection(e, world);
+        }
+    }
+
+    // 軽の敵：かわす必要があれば、逃げたい側へ機体を傾けて真横へ旋回しながら加速する。かわす必要がなければ desired へ進む
+    void SteerLight(Enemy& e, const Vec2& desired, float dt) {
+        if (e.dodgeDir.LengthSq() > 0.0f) {
+            const Vec2 left = Vec2::FromAngle(e.heading).Perpendicular();
+            const Vec2 dodge = (e.dodgeDir.Dot(left) >= 0.0f) ? left : left * -1.0f;
+            Steer(e, AvoidEdges(e, dodge), e.turnDegrees, Config::LightDodgeSpeed, dt);
+        } else {
+            Steer(e, AvoidEdges(e, desired), e.turnDegrees, e.cruiseSpeed, dt);
+        }
+    }
+
+    // 離脱型（軽）：コアへ向かいながら弾を撃ち、近づいたら旋回して離れ、十分に離れたらまたコアへ向かう
+    void UpdateStrafer(Enemy& e, World& world, float dt) {
+        UpdateDodge(e, world, dt);
+        const Vec2 toCore = world.GetCore().pos - e.pos;
+        const float dist = toCore.Length();
+        if (!e.leaving && dist < Config::StraferBreakDistance) {
+            e.leaving = true;
+        } else if (e.leaving && dist > Config::StraferReturnDistance) {
+            e.leaving = false;
+        }
+        const Vec2 desired = e.leaving ? toCore.Normalized() * -1.0f : toCore.Normalized();
+        SteerLight(e, desired, dt);
+        if (!e.leaving) {
+            ShootAtCore(e, world, dt, Config::StraferShotInterval, Config::StraferReturnDistance + 100.0f);
+        }
+    }
+
+    // 自爆型（軽）：弾は撃たず、コアへ体当たりする
+    void UpdateKamikaze(Enemy& e, World& world, float dt) {
+        UpdateDodge(e, world, dt);
+        SteerLight(e, (world.GetCore().pos - e.pos).Normalized(), dt);
+    }
+
+    // 中・重の型：コアから遠めの円を、ゆっくり旋回する
+    void Orbit(Enemy& e, World& world, float keepDistance, float dt) {
+        const Vec2 desired = AvoidEdges(e, OrbitDirection(e, world.GetCore().pos, keepDistance));
+        Steer(e, desired, e.turnDegrees, e.cruiseSpeed, dt);
+    }
+
+    // 撃つ時間が来たら true（撃てる距離にいないときは待つ）
+    bool AttackReady(Enemy& e, const World& world, float dt, float interval, float maxDistance) {
+        e.shotTimer -= dt;
+        if (e.shotTimer > 0.0f) {
+            return false;
+        }
+        if ((world.GetCore().pos - e.pos).Length() > maxDistance) {
+            e.shotTimer = 0.0f;
+            return false;
+        }
+        e.shotTimer += interval;
+        return true;
+    }
+
+    // コアの方向へ、count 発を扇形に（1発なら真っすぐ）
+    float FanAngle(float center, int i, int count) {
+        return center + DegreesToRadians(Config::HeavyShotSpreadDegrees) * (static_cast<float>(i) - (count - 1) * 0.5f);
+    }
+
+    // 基本型（中・重）：弾を撃ち続ける（重は3発を扇形に）
+    void UpdateGunship(Enemy& e, World& world, float dt) {
+        Orbit(e, world, Config::GunshipKeepDistance, dt);
+        if (!AttackReady(e, world, dt, AttackInterval(e, Config::GunshipShotInterval), Config::GunshipKeepDistance + 120.0f)) {
+            return;
+        }
         const Vec2 toCore = world.GetCore().pos - e.pos;
         const float center = std::atan2(toCore.y, toCore.x);
-        const float step = DegreesToRadians(Config::BossShotSpreadDegrees);
-        for (int i = 0; i < Config::BossShotCount; ++i) {
-            const float angle = center + step * (static_cast<float>(i) - (Config::BossShotCount - 1) * 0.5f);
-            const Vec2 dir = Vec2::FromAngle(angle);
+        const int count = (e.cls == EnemyClass::Heavy) ? Config::HeavyShotCount : 1;
+        for (int i = 0; i < count; ++i) {
+            const Vec2 dir = Vec2::FromAngle(FanAngle(center, i, count));
             world.FireEnemyBullet(e.pos + dir * e.radius, dir * Config::EnemyBulletSpeed,
                                   Config::EnemyBulletRadius, Config::EnemyBulletDamage);
         }
     }
 
-    void UpdateEvader(Enemy& e, World& world, float dt) {
-        // 弾を見直すのは、ばらつきのある間隔ごと。たまに見落とす
-        e.reactionTimer -= dt;
-        if (e.reactionTimer <= 0.0f) {
-            e.reactionTimer = world.RandomRange(Config::EvaderReactionMin, Config::EvaderReactionMax);
-            if (world.RandomRange(0.0f, 1.0f) < Config::EvaderMissChance) {
-                e.dodgeDir = Vec2();
-            } else {
-                e.dodgeDir = DodgeDirection(e, world);
-            }
+    // 雷撃型（中・重）：コアを追いかける敵の誘導弾を撃つ（重は3発を扇形に）
+    void UpdateTorpedo(Enemy& e, World& world, float dt) {
+        Orbit(e, world, Config::TorpedoKeepDistance, dt);
+        if (!AttackReady(e, world, dt, AttackInterval(e, Config::TorpedoInterval), Config::TorpedoKeepDistance + 150.0f)) {
+            return;
         }
+        const Vec2 toCore = world.GetCore().pos - e.pos;
+        const float center = std::atan2(toCore.y, toCore.x);
+        const int count = (e.cls == EnemyClass::Heavy) ? Config::HeavyShotCount : 1;
+        for (int i = 0; i < count; ++i) {
+            const float angle = FanAngle(center, i, count);
+            world.FireEnemyMissile(e.pos + Vec2::FromAngle(angle) * e.radius, angle);
+        }
+    }
 
-        Vec2 desired;
-        float targetSpeed = Config::EvaderSpeed;
-        if (e.dodgeDir.LengthSq() > 0.0f) {
-            // 逃げたい側へ機体を傾けて、真横へ向かって旋回しながら加速する
-            const Vec2 forward = Vec2::FromAngle(e.heading);
-            const Vec2 left = forward.Perpendicular();
-            desired = (e.dodgeDir.Dot(left) >= 0.0f) ? left : left * -1.0f;
-            targetSpeed = Config::EvaderDodgeSpeed;
-        } else {
-            desired = OrbitDirection(e, world.GetCore().pos, Config::EvaderKeepDistance);
+    // 空母型（中・重）：軽の敵を生み出す（同時に出ていられる数に上限がある）
+    void UpdateCarrier(Enemy& e, World& world, float dt) {
+        Orbit(e, world, Config::CarrierKeepDistance, dt);
+        if (!AttackReady(e, world, dt, AttackInterval(e, Config::CarrierInterval), 10000.0f)) {
+            return;
         }
-        Steer(e, AvoidEdges(e, desired), Config::EvaderTurnDegrees, targetSpeed, dt);
-        ShootAtCore(e, world, dt, Config::EvaderShotInterval, Config::EvaderKeepDistance + 100.0f);
+        const bool heavy = (e.cls == EnemyClass::Heavy);
+        const int maxChildren = heavy ? Config::HeavyCarrierMaxChildren : Config::CarrierMaxChildren;
+        const int launch = heavy ? Config::HeavyCarrierLaunchCount : Config::CarrierLaunchCount;
+        const int room = maxChildren - world.CountChildren(e.id);
+        if (room > 0) {
+            world.LaunchLightGroup(e, std::min(launch, room));
+        }
     }
 
     bool IsInsideScreen(const Vec2& p, float margin) {
@@ -171,17 +234,20 @@ namespace {
 
 void UpdateEnemy(Enemy& e, World& world, float dt) {
     switch (e.type) {
-    case EnemyType::Charger:
-        UpdateCharger(e, world, dt);
+    case EnemyType::Strafer:
+        UpdateStrafer(e, world, dt);
         break;
-    case EnemyType::Shooter:
-        UpdateShooter(e, world, dt);
+    case EnemyType::Kamikaze:
+        UpdateKamikaze(e, world, dt);
         break;
-    case EnemyType::Evader:
-        UpdateEvader(e, world, dt);
+    case EnemyType::Gunship:
+        UpdateGunship(e, world, dt);
         break;
-    case EnemyType::Boss:
-        UpdateBoss(e, world, dt);
+    case EnemyType::Torpedo:
+        UpdateTorpedo(e, world, dt);
+        break;
+    case EnemyType::Carrier:
+        UpdateCarrier(e, world, dt);
         break;
     }
 
