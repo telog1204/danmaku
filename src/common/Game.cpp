@@ -15,6 +15,13 @@ void Game::Update(double dtSeconds) {
     prevPrimaryDown_ = input.primaryDown;
     const float dt = static_cast<float>(dtSeconds);
 
+    // 戦闘中だけ、画面が自動で消えないようにする（切り替わったときだけOSに知らせる）
+    const bool keepOn = (mode_ == Mode::Battle);
+    if (keepOn != keepScreenOn_) {
+        Platform::SetKeepScreenOn(keepOn);
+        keepScreenOn_ = keepOn;
+    }
+
     switch (mode_) {
     case Mode::Title:
         // タップ（クリック）で、最初から始める

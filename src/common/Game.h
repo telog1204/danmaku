@@ -34,4 +34,5 @@ private:
     Records records_;
     Mode mode_ = Mode::Title;
     bool prevPrimaryDown_ = false;  // 前のフレームで主な操作が続いていたか（押した瞬間を見分けるため）
+    bool keepScreenOn_ = false;     // 今、画面が消えないようにしているか（戦闘中だけ）
 };

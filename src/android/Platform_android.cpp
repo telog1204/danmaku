@@ -2,6 +2,8 @@
 #include "Platform.h"
 #include "Platform_android.h"
 #include <DxLib.h>
+#include <android/native_activity.h>
+#include <android/window.h>
 #include "Config.h"
 
 // Android：タッチで操作する。ゲームは Config::ScreenWidth × Config::ScreenHeight の画面に描き、それを端末の画面いっぱいに
@@ -70,6 +72,19 @@ std::string Platform::SaveFilePath(const char* fileName) {
         return fileName;
     }
     return std::string(path) + "/" + fileName;
+}
+
+void Platform::SetKeepScreenOn(bool on) {
+    // アプリの画面に「画面をつけたままにする」設定を付けている間は、端末の自動消灯で画面が消えない
+    ANativeActivity* activity = const_cast<ANativeActivity*>(GetNativeActivity());
+    if (activity == nullptr) {
+        return;
+    }
+    if (on) {
+        ANativeActivity_setWindowFlags(activity, AWINDOW_FLAG_KEEP_SCREEN_ON, 0);
+    } else {
+        ANativeActivity_setWindowFlags(activity, 0, AWINDOW_FLAG_KEEP_SCREEN_ON);
+    }
 }
 
 void Platform::BeginDraw() {
