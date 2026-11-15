@@ -21,6 +21,11 @@ std::string Platform::SaveFilePath(const char* fileName) {
 void Platform::BeginDraw() {
 }
 
+void Platform::SetKeepScreenOn(bool on) {
+    // OSに「ディスプレイを使っている」と知らせている間は、省電力で画面が消えない
+    SetThreadExecutionState(on ? (ES_CONTINUOUS | ES_DISPLAY_REQUIRED) : ES_CONTINUOUS);
+}
+
 void Platform::EndDraw() {
     ScreenFlip();
 }

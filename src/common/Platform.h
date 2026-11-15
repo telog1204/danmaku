@@ -23,4 +23,8 @@ namespace Platform {
     // 1フレームの描画の前後に呼ぶ。描き終わったら画面に表示する
     void BeginDraw();
     void EndDraw();
+
+    // 画面が自動で消えない（スリープしない）ようにする／元に戻す
+    // （Windows：ディスプレイの省電力、Android：端末の自動消灯）
+    void SetKeepScreenOn(bool on);
 }
