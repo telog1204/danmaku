@@ -177,7 +177,8 @@ bool BuildScreen::Update(World& world, const InputState& input, float dt) {
         if (!dragging_ && dragColumn_ >= 0 && std::abs(input.y - pressY_) > DragThreshold) {
             dragging_ = true;
         }
-        if (dragging_) {
+        // 開いたときの指（スクロールする列がない）は、スクロールさせない
+        if (dragging_ && dragColumn_ >= 0) {
             float& s = scroll_[dragColumn_];
             s = std::max(0.0f, std::min(MaxScroll(dragColumn_, world), s - static_cast<float>(input.y - lastY_)));
         }
