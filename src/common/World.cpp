@@ -2,6 +2,7 @@
 #include "World.h"
 #include <DxLib.h>
 #include "Config.h"
+#include "CrashState.h"
 #include "EnemyAI.h"
 
 namespace {
@@ -464,7 +465,9 @@ void World::Update(float dtSeconds) {
 
 void World::Step(float dt) {
     elapsed_ += dt;
+    CrashState::SetElapsed(elapsed_);
 
+    CrashState::SetPhase(CrashState::Phase::Spawn);
     spawnTimer_ -= dt;
     if (spawnTimer_ <= 0.0f) {
         SpawnEnemy();
@@ -480,10 +483,12 @@ void World::Step(float dt) {
         }
     }
 
+    CrashState::SetPhase(CrashState::Phase::Weapons);
     for (auto& w : weapons_) {
         w->Update(*this, dt);
     }
 
+    CrashState::SetPhase(CrashState::Phase::Enemies);
     // 敵の動きの途中で生み出された敵（空母型）は pendingEnemies_ にためておき、動きの処理が終わってから加える
     for (Enemy& e : enemies_) {
         UpdateEnemy(e, *this, dt);
@@ -493,16 +498,28 @@ void World::Step(float dt) {
     }
     pendingEnemies_.clear();
 
+    CrashState::SetPhase(CrashState::Phase::MoveBullets);
     MoveBullets(playerBullets_, dt);
     MoveEnemyBullets(dt);
+    CrashState::SetPhase(CrashState::Phase::MoveBeams);
     MoveBeams(dt);
+    CrashState::SetPhase(CrashState::Phase::MoveMissiles);
     MoveMissiles(dt);
+    CrashState::SetPhase(CrashState::Phase::MoveShells);
     MoveShells(dt);
+    CrashState::SetPhase(CrashState::Phase::Explosions);
     AgeExplosions(dt);
+    CrashState::SetPhase(CrashState::Phase::Collisions);
     HandleCollisions();
+    CrashState::SetPhase(CrashState::Phase::Pickups);
     MovePickups(dt);
     AgeMessages(dt);
+    CrashState::SetPhase(CrashState::Phase::Cleanup);
     RemoveDead();
+    CrashState::SetCounts(static_cast<int>(enemies_.size()), static_cast<int>(enemyBullets_.size()),
+                          static_cast<int>(playerBullets_.size()), static_cast<int>(missiles_.size()),
+                          static_cast<int>(beams_.size()), static_cast<int>(shells_.size()),
+                          static_cast<int>(explosions_.size()), static_cast<int>(pickups_.size()));
 
     if (core_.hp <= 0) {
         core_.hp = 0;

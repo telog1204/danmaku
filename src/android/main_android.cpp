@@ -2,6 +2,7 @@
 #include <DxLib.h>
 #include "Config.h"
 #include "GameLoop.h"
+#include "Platform.h"
 #include "Platform_android.h"
 
 namespace {
@@ -49,6 +50,7 @@ int android_main(void) {
     }
     SetDrawScreen(DX_SCREEN_BACK);
     AndroidPlatform::SetUpScreen();
+    Platform::InstallCrashRecorder();
 
     RunGame();
 

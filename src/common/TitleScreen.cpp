@@ -72,7 +72,7 @@ void TitleScreen::Update(float dt) {
     }
 }
 
-void TitleScreen::Draw(const Records& records) const {
+void TitleScreen::Draw(const Records& records, const std::string& crashReport) const {
     DrawBox(0, 0, Config::ScreenWidth, Config::ScreenHeight, GetColor(3, 5, 10), TRUE);
 
     SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
@@ -94,5 +94,21 @@ void TitleScreen::Draw(const Records& records) const {
         char line[128];
         std::snprintf(line, sizeof(line), "最高記録　生存 %.1f秒　／　撃破 %d体", records.bestSeconds, records.bestKills);
         DrawCentered(410, line, GetColor(255, 233, 160));
+    }
+
+    // 前回の異常終了の記録（原因を調べるため）
+    if (!crashReport.empty()) {
+        int y = 446;
+        DrawString(20, y, "前回、異常終了しました（この画面を保存して知らせてください）", GetColor(255, 110, 110));
+        y += 20;
+        size_t start = 0;
+        while (start < crashReport.size() && y < Config::ScreenHeight - 16) {
+            size_t end = crashReport.find('\n', start);
+            if (end == std::string::npos) end = crashReport.size();
+            const std::string line = crashReport.substr(start, end - start);
+            DrawString(20, y, line.c_str(), GetColor(255, 190, 190));
+            y += 18;
+            start = end + 1;
+        }
     }
 }

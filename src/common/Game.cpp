@@ -3,9 +3,10 @@
 #include <DxLib.h>
 #include "Config.h"
 #include "Platform.h"
+#include "CrashState.h"
 #include "Renderer.h"
 
-Game::Game() : records_(LoadRecords()) {
+Game::Game() : records_(LoadRecords()), crashReport_(Platform::ReadCrashReport()) {
 }
 
 void Game::Update(double dtSeconds) {
@@ -14,6 +15,9 @@ void Game::Update(double dtSeconds) {
     const bool pressed = input.primaryDown && !prevPrimaryDown_;
     prevPrimaryDown_ = input.primaryDown;
     const float dt = static_cast<float>(dtSeconds);
+    if (mode_ != Mode::Battle) {
+        CrashState::SetPhase(CrashState::Phase::Menu);
+    }
 
     // 戦闘中だけ、画面が自動で消えないようにする（切り替わったときだけOSに知らせる）
     const bool keepOn = (mode_ == Mode::Battle);
@@ -27,6 +31,11 @@ void Game::Update(double dtSeconds) {
         // タップ（クリック）で、最初から始める
         titleScreen_.Update(dt);
         if (pressed) {
+            // 前回の異常終了の記録は、ゲームを始めたら消す（同じ記録が何度も出ないように）
+            if (!crashReport_.empty()) {
+                Platform::ClearCrashReport();
+                crashReport_.clear();
+            }
             world_.Reset();
             mode_ = Mode::Battle;
         }
@@ -88,9 +97,10 @@ void Game::Update(double dtSeconds) {
 }
 
 void Game::Draw() {
+    CrashState::SetPhase(CrashState::Phase::Draw);
     switch (mode_) {
     case Mode::Title:
-        titleScreen_.Draw(records_);
+        titleScreen_.Draw(records_, crashReport_);
         return;
     case Mode::Build:
         buildScreen_.Draw(world_);

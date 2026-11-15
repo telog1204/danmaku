@@ -1,5 +1,6 @@
 #pragma once
 #include <random>
+#include <string>
 #include <vector>
 #include "Records.h"
 #include "Vec2.h"
@@ -12,7 +13,8 @@ public:
     // 背景の弾を動かす
     void Update(float dt);
 
-    void Draw(const Records& records) const;
+    // crashReport が空でなければ、前回の異常終了の記録を画面の下に出す
+    void Draw(const Records& records, const std::string& crashReport) const;
 
 private:
     struct Particle {
