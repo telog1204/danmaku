@@ -27,4 +27,10 @@ namespace Platform {
     // 画面が自動で消えない（スリープしない）ようにする／元に戻す
     // （Windows：ディスプレイの省電力、Android：端末の自動消灯）
     void SetKeepScreenOn(bool on);
+
+    // 異常終了したときに、直前の状況をファイル（crash.txt）に書き残す仕組みを登録する（DxLib_Init のあとに1回呼ぶ）。
+    // 次に起動したときに ReadCrashReport で読み、表示したら ClearCrashReport で消す（Windows版は何もしない）
+    void InstallCrashRecorder();
+    std::string ReadCrashReport();
+    void ClearCrashReport();
 }

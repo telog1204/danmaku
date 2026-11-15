@@ -26,6 +26,17 @@ void Platform::SetKeepScreenOn(bool on) {
     SetThreadExecutionState(on ? (ES_CONTINUOUS | ES_DISPLAY_REQUIRED) : ES_CONTINUOUS);
 }
 
+// Windows版では、異常終了の記録は作らない（今は Android版の原因を調べるための仕組み）
+void Platform::InstallCrashRecorder() {
+}
+
+std::string Platform::ReadCrashReport() {
+    return std::string();
+}
+
+void Platform::ClearCrashReport() {
+}
+
 void Platform::EndDraw() {
     ScreenFlip();
 }
