@@ -114,6 +114,8 @@ void World::Reset() {
     fleetKills_ = 0;
     nextId_ = 1;
     elapsed_ = 0.0f;
+    lightCrowdTime_ = -1.0f;
+    lightCrowdFound_ = false;
     spawnTimer_ = 0.0f;
     gameOver_ = false;
     gameOverSeconds_ = 0.0f;
@@ -299,6 +301,7 @@ std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRang
             t.id = e.id;
             t.pos = e.pos;
             t.vel = e.vel;
+            t.light = (e.cls == EnemyClass::Light);
             if (!accept || accept(t)) {
                 found.emplace_back(d, t);
             }
@@ -338,12 +341,18 @@ namespace {
     }
 }
 
-Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude) {
-    std::vector<Target> candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates,
-                                                           [&exclude](const Target& t) { return !Contains(exclude, t); });
+Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude,
+                               bool lightAndBulletsOnly) {
+    // 速射砲は、軽の敵と敵の弾だけを狙う（中・重にはほとんど効かないため）
+    const auto allowed = [lightAndBulletsOnly](const Target& t) {
+        return !lightAndBulletsOnly || t.kind == TargetKind::EnemyBullet || t.light;
+    };
+    std::vector<Target> candidates = FindNearestCandidates(
+        from, maxRange, bodiesFirst, Config::LockOnCandidates,
+        [&exclude, &allowed](const Target& t) { return allowed(t) && !Contains(exclude, t); });
     if (candidates.empty()) {
         // 外すと候補がなくなるときは、ほかの武装と重なっても狙う
-        candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates);
+        candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates, allowed);
     }
     if (candidates.empty()) {
         return Target();
@@ -436,6 +445,39 @@ bool World::FindCrowdCenter(Vec2& center) const {
         }
     }
     return bestCount > 0;
+}
+
+bool World::FindLightCrowdCenter(Vec2& center) {
+    if (lightCrowdTime_ < 0.0f || elapsed_ - lightCrowdTime_ >= Config::CrowdRefreshSeconds || elapsed_ < lightCrowdTime_) {
+        lightCrowdTime_ = elapsed_;
+        // 軽の敵と敵の弾の位置を集め、周り（CrowdRadius 以内）に最も多く集まっている所の平均の位置を中心とする
+        std::vector<Vec2> points;
+        for (const Enemy& e : enemies_) {
+            if (e.alive && e.cls == EnemyClass::Light) points.push_back(e.pos);
+        }
+        for (const Bullet& b : enemyBullets_) {
+            if (b.alive) points.push_back(b.pos);
+        }
+        const float r2 = Config::CrowdRadius * Config::CrowdRadius;
+        int bestCount = 0;
+        for (const Vec2& p : points) {
+            int count = 0;
+            Vec2 sum;
+            for (const Vec2& o : points) {
+                if ((o - p).LengthSq() <= r2) {
+                    ++count;
+                    sum += o;
+                }
+            }
+            if (count > bestCount) {
+                bestCount = count;
+                lightCrowdCenter_ = sum * (1.0f / count);
+            }
+        }
+        lightCrowdFound_ = bestCount > 0;
+    }
+    center = lightCrowdCenter_;
+    return lightCrowdFound_;
 }
 
 void World::FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, float damage) {

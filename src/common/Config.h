@@ -75,6 +75,7 @@ namespace Config {
     constexpr float ShellDirectDamage = 15.0f;    // 直撃した敵への威力
     constexpr float ShellShortDistance = 30.0f;   // 敵が多い場所の中心から、どれだけ手前で炸裂するか
     constexpr float CrowdRadius = 100.0f;         // 「敵が多い場所」を数えるときの範囲（半径）
+    constexpr float CrowdRefreshSeconds = 0.1f;   // 速射砲の攻撃型：「軽の敵と敵の弾が多い場所」を数え直す間隔（数が多く重いため）
     constexpr float ShellFlameRadius = 70.0f;
     constexpr float ShellFlameDamage = 6.0f;
     constexpr float ShellFlameSeconds = 0.4f;     // 爆炎がその場に残る時間
@@ -87,8 +88,9 @@ namespace Config {
     constexpr int ShellEnergy = 30;
 
     // 派生版（上の基本型との違い）
-    constexpr float RapidSweepDegrees = 30.0f;       // 速射砲 弾幕型・攻撃型：扇形に往復する幅（片側の角度）
-    constexpr float RapidSweepSpeedDegrees = 120.0f; // 往復する速さ（度/秒）
+    constexpr float RapidSweepDegrees = 15.0f;       // 速射砲 弾幕型・攻撃型：扇形に往復する幅（片側の角度）。端でゆっくりになる滑らかな往復
+    constexpr float RapidSweepPeriodMin = 0.8f;      // 1往復の時間（秒）。速射砲ごとにこの範囲でランダムに決め、全体で揃わないようにする
+    constexpr float RapidSweepPeriodMax = 1.2f;
     constexpr float RapidCloseInterval = 0.05f;      // 速射砲 近接防御型：撃つ間隔
     constexpr float RapidCloseRange = 300.0f;        // 速射砲 近接防御型：この距離に何か入ったら撃ち始め、いなくなったらやめる
     constexpr int RapidBarrageEnergy = 10;

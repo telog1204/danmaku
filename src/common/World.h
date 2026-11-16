@@ -221,13 +221,18 @@ public:
                                               const std::function<bool(const Target&)>& accept = nullptr) const;
     // 近い順に3番目までの中から、ランダムに1つ選ぶ（ロックオンする相手を決める）。
     // exclude にある相手は候補から外す（外すと候補がなくなるときは、外さずに選ぶ）
-    Target PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude = {});
+    // lightAndBulletsOnly なら、軽の敵と敵の弾だけを候補にする（速射砲）
+    Target PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude = {},
+                            bool lightAndBulletsOnly = false);
     // self と同じ種類（派生版と連装の段階が同じ）のほかの武装が、今狙っている相手
     std::vector<Target> TargetsOfSameKind(const Weapon* self) const;
     // 番号で相手を探す（もういなければ kind が None になる）
     Target FindTargetById(TargetKind kind, int id) const;
     // 敵が多い場所の中心（敵本体がいなければ false）
     bool FindCrowdCenter(Vec2& center) const;
+    // 軽の敵と敵の弾が多い場所の中心（どちらもいなければ false）。速射砲の攻撃型が使う。
+    // 敵の弾は数が多く重くなるので、ゲームの時間で CrowdRefreshSeconds ごとに数え直し、その間は前の結果を使う
+    bool FindLightCrowdCenter(Vec2& center);
 
     void AddPlayerBullet(const Bullet& b) { playerBullets_.push_back(b); }
     void FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, float damage);
@@ -284,6 +289,10 @@ private:
     std::mt19937 rng_;
     int nextId_ = 1;
     float elapsed_ = 0.0f;
+    // FindLightCrowdCenter の前の結果（数え直した時刻。負ならまだ数えていない）
+    float lightCrowdTime_ = -1.0f;
+    bool lightCrowdFound_ = false;
+    Vec2 lightCrowdCenter_;
     float spawnTimer_ = 0.0f;
     float grandFleetTimer_ = 0.0f;  // 次の大艦隊が現れるまでの時間（大艦隊がいない間だけ減る）
     std::vector<Enemy> pendingEnemies_;  // 敵の動きの途中で生み出された敵（動きの処理が終わってから加える）

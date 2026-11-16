@@ -76,7 +76,7 @@ void Game::Update(double dtSeconds) {
 
     // 戦闘中：「組み込み」ボタンで組み込み画面を開き、時間を止める
     if (pressed && BuildScreen::HitOpenButton(input.x, input.y)) {
-        buildScreen_.Open();
+        buildScreen_.Open(world_);
         mode_ = Mode::Build;
         return;
     }

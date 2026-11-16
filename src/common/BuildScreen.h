@@ -8,8 +8,9 @@ class World;
 // 詳しい画面では、強化パーツの付け外しと、武装を外す操作をする。一覧は指でなぞる（ドラッグする）とスクロールする
 class BuildScreen {
 public:
-    // 開いたときに呼ぶ（前に開いたときの表示を消す）
-    void Open();
+    // 開いたときに呼ぶ（前に開いたときの表示を消す）。
+    // スクロールの位置は、今の一覧で動かせる範囲に収める（やり直したあとなど、一覧が短くなっていても中身が見えるように）
+    void Open(const World& world);
 
     // 入力を受けて、表示の時間を進める。閉じるときは true を返す
     bool Update(World& world, const InputState& input, float dt);
