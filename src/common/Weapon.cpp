@@ -217,6 +217,92 @@ namespace {
         bool fastTurning_ = false;   // 撃つのをやめて速く旋回している
     };
 
+    // ビーム砲の砲塔。角速度を持ち、少しずつ加速し、狙う方向に近づくと少しずつ減速して止まる（最高の速さは Turret と同じ考え方）。
+    // 旋回中は撃たず、狙う方向とのずれが BeamAimedDegrees 以内になったら（旋回を終えたら）撃てる。
+    // 旋回を終えて撃つ間隔を待つ間は、低速（BeamHoldTurnDegrees まで）で相手を向き続け、ずれが BeamHoldBreakDegrees を
+    // 超えたら、ふつうの旋回に戻る。狙っていた相手がいなくなって、次の相手との角度の差が TurretRetargetDegrees より
+    // 大きいときは、速い旋回（BeamFastTurnDegrees まで）で向き直る
+    class SmoothTurret {
+    public:
+        void Update(World& world, bool hasTarget, float desired, const Target& tracked, float dt) {
+            hasTarget_ = hasTarget;
+            const float accel = DegreesToRadians(Config::BeamTurnAccelDegrees);
+            // 狙っていた相手がいなくなったかを見る（次の相手を狙うときの旋回の仕方を決めるため）
+            if (trackedKind_ != TargetKind::None && (tracked.kind != trackedKind_ || tracked.id != trackedId_) &&
+                world.FindTargetById(trackedKind_, trackedId_).kind == TargetKind::None) {
+                lostTarget_ = true;
+            }
+            // 狙う方向が動く速さ（相手が動く分）。相手が替わった直後は分からないので 0 とする
+            const bool sameTarget = (tracked.kind == trackedKind_ && tracked.id == trackedId_);
+            const float desiredRate = (sameTarget && hadDesired_ && dt > 0.0f) ? WrapAngle(desired - lastDesired_) / dt : 0.0f;
+            lastDesired_ = desired;
+            hadDesired_ = hasTarget;
+            trackedKind_ = tracked.kind;
+            trackedId_ = tracked.id;
+
+            if (!hasTarget) {
+                // 狙うものがいなければ、少しずつ止まる
+                holding_ = false;
+                const float slow = accel * dt;
+                omega_ = (std::fabs(omega_) <= slow) ? 0.0f : omega_ - (omega_ > 0.0f ? slow : -slow);
+                facing_ = WrapAngle(facing_ + omega_ * dt);
+                diff_ = Pi;
+                return;
+            }
+            float diff = WrapAngle(desired - facing_);
+            if (lostTarget_) {
+                lostTarget_ = false;
+                holding_ = false;
+                fastTurning_ = std::fabs(diff) > DegreesToRadians(Config::TurretRetargetDegrees);
+            }
+            if (holding_ && std::fabs(diff) > DegreesToRadians(Config::BeamHoldBreakDegrees)) {
+                holding_ = false;  // 低速では追い切れなくなったので、ふつうの旋回に戻る
+            }
+            const float maxSpeed = DegreesToRadians(holding_ ? Config::BeamHoldTurnDegrees
+                                                    : (fastTurning_ ? Config::BeamFastTurnDegrees : Config::BeamTurnDegrees));
+            // 狙う方向でちょうど止まれる速さ（残りの角度から決める）に、狙う方向が動く速さを足した速さを目指し、
+            // 角加速度の範囲で速さを変える（動く相手にも遅れずに向き続けられるように。最高の速さは超えない）
+            // ちょうど止まれる速さは、1回の処理ごとに change ずつ減速して残りの角度で止まれる速さ
+            //（v + (v−change) + … を dt 倍した距離が残りの角度になる v）
+            const float sign = (diff >= 0.0f) ? 1.0f : -1.0f;
+            const float change = accel * dt;
+            const float stopSpeed =
+                (dt > 0.0f) ? 0.5f * (-change + std::sqrt(change * change + 8.0f * change * std::fabs(diff) / dt)) : 0.0f;
+            const float wanted = std::max(-maxSpeed, std::min(maxSpeed, desiredRate + sign * std::min(maxSpeed, stopSpeed)));
+            omega_ += std::max(-change, std::min(change, wanted - omega_));
+            float step = omega_ * dt;
+            if (step * diff > 0.0f && std::fabs(step) > std::fabs(diff)) {
+                step = diff;  // 行き過ぎない
+                if (dt > 0.0f) omega_ = step / dt;
+            }
+            facing_ = WrapAngle(facing_ + step);
+            diff_ = std::fabs(WrapAngle(desired - facing_));
+            if (!holding_ && diff_ <= DegreesToRadians(Config::BeamAimedDegrees)) {
+                holding_ = true;   // 旋回を終えた
+                fastTurning_ = false;
+            }
+        }
+
+        // 撃ってよいか（旋回を終えて、狙う方向とのずれが小さい）
+        bool CanFire() const { return hasTarget_ && holding_ && diff_ <= DegreesToRadians(Config::BeamAimedDegrees); }
+        float Facing() const { return facing_; }
+        const float* FacingPtr() const { return &facing_; }
+        float AngularSpeed() const { return omega_; }
+
+    private:
+        float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
+        float omega_ = 0.0f;         // 今の旋回の速さ（ラジアン/秒。向きの正負あり）
+        float diff_ = Pi;            // 狙う方向とのずれ（ラジアン）
+        bool hasTarget_ = false;
+        bool holding_ = false;       // 旋回を終えて、低速で相手を向き続けている
+        bool fastTurning_ = false;   // 相手が替わって、速い旋回で向き直っている
+        TargetKind trackedKind_ = TargetKind::None;
+        int trackedId_ = 0;
+        bool lostTarget_ = false;
+        float lastDesired_ = 0.0f;   // 前の回の狙う方向
+        bool hadDesired_ = false;
+    };
+
     // 速射砲の連装型で、横に並べる砲の数（4連装は2連装と同じ2門の並びで、発射速度を2倍にする）
     int RapidMounts(int barrels) {
         return barrels == 4 ? 2 : barrels;
@@ -350,8 +436,7 @@ namespace {
         BeamGun(const WeaponKind& kind, float firstDelay)
             : TimedWeapon(kind,
                           Config::BeamInterval * (kind.variant == WeaponVariant::BeamDecisive ? Config::BeamDecisiveIntervalScale : 1.0f),
-                          firstDelay, Config::BeamVolleyGap),
-              turret_(Config::BeamTurnDegrees, Config::BeamFastTurnDegrees) {}
+                          firstDelay, Config::BeamVolleyGap) {}
 
         bool HasTurret() const override { return true; }
         float TurretAngle() const override { return turret_.Facing(); }
@@ -392,7 +477,7 @@ namespace {
             const bool hasTarget = (target.kind != TargetKind::None);
             const float desired =
                 hasTarget ? AngleOf(LeadTarget(origin, target.pos, target.vel, Config::BeamSpeed) - origin) : turret_.Facing();
-            turret_.Update(world, hasTarget, desired, target, false, dt);
+            turret_.Update(world, hasTarget, desired, target, dt);
         }
 
         bool FireShot(World& world, int shot) override {
@@ -403,7 +488,7 @@ namespace {
                 return true;
             }
             if (!turret_.CanFire()) {
-                return false;  // 狙うものがいないときと、速く旋回している間は撃たない
+                return false;  // 旋回を終えるまで撃たない（撃つ間隔が来ていれば、旋回を終えた瞬間に撃つ）
             }
             // ビームは、狙う方向ではなく今向いている方向へ出る
             volleyDir_ = Vec2::FromAngle(turret_.Facing());
@@ -428,7 +513,7 @@ namespace {
 
         LockOn lock_;     // 基本型：ロックオンしている相手
         Target target_;   // 今狙っている相手（攻撃型はこれをロックオンとして使う）
-        Turret turret_;
+        SmoothTurret turret_;
         Vec2 volleyDir_;  // 一斉射の向き（最初の1門を撃った向き）
     };
 
