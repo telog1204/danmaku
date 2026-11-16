@@ -116,6 +116,8 @@ namespace Config {
     constexpr float MultiBarrelEnergyRate = 0.8f;    // 連装＝単装×2、三連装＝単装×3、四連装＝連装×2、八連装＝四連装×2 に、この割合をかける（四捨五入）
     constexpr float RapidBarrelSpacing = 8.0f;       // 速射砲：並べた砲の間隔（ドット）
     constexpr float BeamBarrelSpacing = 10.0f;       // ビーム砲：並べた砲の間隔（ドット）
+    constexpr float RapidBarrelLength = 28.0f;       // 速射砲：画面に描く砲身の長さ（コアの中心から先端まで）
+    constexpr float BeamBarrelLength = 48.0f;        // ビーム砲：画面に描く砲身の長さ
     constexpr float BeamVolleyGap = 0.05f;           // ビーム砲：一斉射で1門ずつずらす時間（秒）
     constexpr float MissileVolleyGap = 0.15f;        // 誘導兵器：一斉射で1門ずつずらす時間（秒）
     constexpr float ShellVolleyGap = 0.1f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）
