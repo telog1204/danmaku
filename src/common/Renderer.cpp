@@ -18,17 +18,19 @@ namespace {
         DrawCircle(Px(p.x), Px(p.y), Sz(r), GetColor(cr, cg, cb), TRUE);
     }
 
+    // コア：明るい水色の丸だけ（周りの光や縁取りは描かない。後ろの砲身が縁から見えるように）
     void DrawCore(const Core& core) {
-        DrawGlowCircle(core.pos, core.radius, 80, 220, 255);
-        DrawCircle(Px(core.pos.x), Px(core.pos.y), Sz(core.radius + 6.0f), GetColor(40, 120, 160), FALSE, Sz(2.0f));
+        DrawCircle(Px(core.pos.x), Px(core.pos.y), Sz(core.radius), GetColor(80, 220, 255), TRUE);
     }
 
-    // 砲身（速射砲・ビーム砲）：コアの中心から、今向いている方向へ伸ばす。連装は、弾が出る砲の並びに合わせて平行に並べる
-    void DrawBarrels(const World& world) {
+    // 砲身（速射砲・ビーム砲）：コアの中心から、今向いている方向へ伸ばす。連装は、弾が出る砲の並びに合わせて平行に並べる。
+    // rapid が true なら速射砲だけ、false ならビーム砲だけを描く（ビーム砲を先に描いて、速射砲を上に重ねるため）
+    void DrawBarrels(const World& world, bool rapidOnly) {
         const Vec2 center = world.GetCore().pos;
         for (const auto& w : world.Weapons()) {
             if (!w->HasTurret()) continue;  // 向きを持たない武装（誘導兵器・炸裂弾）は描かない
             const bool rapid = (FamilyOf(w->Kind()) == WeaponFamily::RapidGun);
+            if (rapid != rapidOnly) continue;
             const int barrels = w->Kind().barrels;
             // 速射砲の四連装は、撃ち方と同じく2門の並び
             const int mounts = (rapid && barrels == 4) ? 2 : barrels;
@@ -218,12 +220,12 @@ namespace {
 }
 
 void DrawWorld(const World& world) {
-    // 光るもの（コア・敵・弾）は加算合成で描く
-    SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
-    DrawCore(world.GetCore());
-    // 砲身は色がそのまま見えるように、重ねずに描く
+    // 砲身はコアの後ろに、色がそのまま見えるように描く（ビーム砲の上に速射砲を重ねる）
     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-    DrawBarrels(world);
+    DrawBarrels(world, false);
+    DrawBarrels(world, true);
+    DrawCore(world.GetCore());
+    // 光るもの（敵・弾）は加算合成で描く
     SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
     for (const Enemy& e : world.Enemies()) {
         DrawEnemy(e);
