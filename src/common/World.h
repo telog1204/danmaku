@@ -210,23 +210,28 @@ public:
     Target FindNearestTarget(const Vec2& from) const;
     // 敵本体と敵の弾を区別せずに、from から maxRange 以内で最も近いものを探す（近接防御型）
     Target FindNearestAny(const Vec2& from, float maxRange) const;
-    // HPが最も高い敵本体を探す（敵本体がいなければ、from に最も近い敵の弾）
-    // exclude にある相手は除く（除くと敵本体がいなくなるときは、除かずに選ぶ）
-    Target FindHighestHpTarget(const Vec2& from, const std::vector<Target>& exclude = {}) const;
+    // 最大HPが最も高い敵本体を探す（同じなら from に近い方。敵本体がいなければ、from に最も近い敵の弾）。
+    // exclude にある相手は除く（除くと敵本体がいなくなるときは、除かずに選ぶ）。
+    // mediumFirst なら中・重から選び、中・重がいなければ軽から選ぶ（ビーム砲）。
+    // keep（今狙っている相手）が、選んだ相手と同じ最大HPで同じ区分にいるなら、keep を選び続ける（狙いがふらつかないように）
+    Target FindHighestHpTarget(const Vec2& from, const std::vector<Target>& exclude = {}, bool mediumFirst = false,
+                               const Target& keep = Target()) const;
+    // ビーム砲の攻撃型：from から撃ったときに、ビームの線の上に乗る相手が最も多い敵本体を探す
+    // （敵本体は1、敵の弾は BeamPierceBulletWeight として数え、同じなら近い方）。中・重から選び、いなければ軽から選ぶ。
+    // exclude にある相手は除く（除くと候補がなくなるときは、除かずに選ぶ）。敵本体がいなければ、最も近い敵の弾
+    Target FindPierceTarget(const Vec2& from, const std::vector<Target>& exclude = {}) const;
     // from に近い順に、最大 count 個の相手を並べる（maxRange より遠いものは除く）。
     // bodiesFirst なら敵本体だけを並べ、本体がいないときだけ敵の弾を並べる。そうでなければ本体と弾を区別しない
     // accept を渡したときは、それが true を返す相手だけを並べる
     std::vector<Target> FindNearestCandidates(const Vec2& from, float maxRange, bool bodiesFirst, size_t count,
                                               const std::function<bool(const Target&)>& accept = nullptr) const;
-    // 近い順に3番目までの中から、ランダムに1つ選ぶ（ロックオンする相手を決める）。
-    // exclude にある相手は候補から外す（外すと候補がなくなるときは、外さずに選ぶ）
-    // lightAndBulletsOnly なら、軽の敵と敵の弾だけを候補にする（速射砲）
-    Target PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude = {},
-                            bool lightAndBulletsOnly = false);
-    // 狙っていた相手がいなくなったときに使う：facing の向きから coneRadians（片側）以内にいる相手のうち、
-    // 角度の差が最も小さいものを選ぶ（旋回せずに狙える相手）。exclude にある相手は除く。いなければ kind が None
-    Target PickInAimCone(const Vec2& from, float maxRange, float facing, float coneRadians, const std::vector<Target>& exclude,
-                         bool lightAndBulletsOnly) const;
+    // ロックオンする相手を選ぶ。priority の順に区分を見て、相手がいる最初の区分の中から選ぶ。
+    // keepAimFacing を渡したとき（砲塔を持つ武装が、狙っていた相手を失ったとき）は、まずその向きから
+    // TurretKeepAimDegrees 以内にいる相手のうち角度の差が最も小さいもの（旋回せずに狙える相手）を選ぶ。
+    // いなければ、近い順に3番目までの中からランダムに1つ選ぶ。
+    // exclude にある相手は候補から外す（外すと候補がなくなるときは、外さずに選ぶ）。だれもいなければ kind が None
+    Target PickLockOnTarget(const Vec2& from, float maxRange, TargetPriority priority, const std::vector<Target>& exclude = {},
+                            const float* keepAimFacing = nullptr);
     // self と同じ種類（派生版が同じ。連装の段階は区別しない）のほかの武装が、今狙っている相手
     std::vector<Target> TargetsOfSameKind(const Weapon* self) const;
     // 番号で相手を探す（もういなければ kind が None になる）

@@ -36,18 +36,21 @@ namespace Config {
     constexpr float RapidGunDamage = 1.0f;
     constexpr float RapidGunSpreadDegrees = 2.0f; // 狙いからずれる最大の角度（度）
     constexpr float RapidTurnDegrees = 180.0f;    // 砲が1秒間に旋回できる角度（度）
-    // 狙っていた相手がいなくなり、次の相手との角度の差がこれより大きいときは、撃つのをやめて速く旋回する
-    constexpr float RapidRetargetDegrees = 45.0f;
+    // 砲塔（速射砲・ビーム砲）：狙っていた相手がいなくなり、次の相手との角度の差がこれより大きいときは、撃つのをやめて速く旋回する
+    constexpr float TurretRetargetDegrees = 45.0f;
     constexpr float RapidFastTurnDegrees = 360.0f; // そのときの旋回の速さ（度/秒）
-    constexpr float RapidResumeDegrees = 10.0f;    // 角度の差がこれ以内になったら、撃つのを再開してふだんの旋回に戻る
+    constexpr float TurretResumeDegrees = 10.0f;   // 角度の差がこれ以内になったら、撃つのを再開してふだんの旋回に戻る
     // 狙っていた相手がいなくなったとき、今の向きからこの角度（片側）以内に狙える相手がいれば、旋回せずに済むその相手を優先する
-    constexpr float RapidKeepAimDegrees = 20.0f;
+    constexpr float TurretKeepAimDegrees = 20.0f;
     constexpr float PlayerBulletRadius = 3.0f;
     constexpr float RapidBulletTailLength = 24.0f; // 弾の見た目の長さ（赤一色の短い線で描く。当たり判定は丸のまま）
     constexpr int RapidGunEnergy = 10;
 
     // ビーム砲（基本型）。敵を貫き、貫くたびに威力が下がる。長い尾を含めた線全体に当たり判定がある
-    constexpr float BeamInterval = 0.3f;
+    constexpr float BeamInterval = 0.6f;
+    constexpr float BeamTurnDegrees = 90.0f;       // 砲が1秒間に旋回できる角度（度）
+    constexpr float BeamFastTurnDegrees = 180.0f;  // 相手が替わって速く旋回するときの速さ（度/秒）
+    constexpr float BeamPierceBulletWeight = 0.5f; // 攻撃型：線の上に乗る数を数えるときの、敵の弾1つの重み（敵本体は1）
     constexpr float BeamSpeed = 2400.0f;
     constexpr float BeamDamage = 12.0f;
     constexpr float BeamDecay = 0.7f;             // 1つ貫くごとに、威力がこの割合になる

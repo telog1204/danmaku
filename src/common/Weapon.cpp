@@ -55,12 +55,12 @@ namespace {
     // 選び直すときは、同じ種類のほかの武装が狙っている相手を候補から外す（同じ種類の武装どうしで狙いを分ける）
     class LockOn {
     public:
-        // 今ロックオンしている相手を返す。外れていたら選び直す（狙うものがいなければ kind が None）
-        // lightAndBulletsOnly なら、軽の敵と敵の弾だけから選ぶ（速射砲）。
-        // keepAimFacing を渡したとき（速射砲）は、狙っていた相手がいなくなったら、まずその向きから
-        // RapidKeepAimDegrees 以内にいる相手（旋回せずに狙える相手）を選ぶ。いなければ近い順3つから選ぶ
-        Target Get(World& world, const Weapon* self, const Vec2& from, float maxRange, bool bodiesFirst,
-                   bool lightAndBulletsOnly = false, const float* keepAimFacing = nullptr) {
+        // 今ロックオンしている相手を返す。外れていたら選び直す（狙うものがいなければ kind が None）。
+        // priority：狙う相手の優先の仕方（速射砲は軽の敵と敵の弾だけ、ビーム砲は中・重から）。
+        // keepAimFacing を渡したとき（砲塔を持つ武装）は、狙っていた相手がいなくなったら、まずその向きから
+        // TurretKeepAimDegrees 以内にいる相手（旋回せずに狙える相手）を選ぶ。いなければ近い順3つから選ぶ
+        Target Get(World& world, const Weapon* self, const Vec2& from, float maxRange, TargetPriority priority,
+                   const float* keepAimFacing = nullptr) {
             const bool hadTarget = (kind_ != TargetKind::None);
             if (hadTarget) {
                 const Target t = world.FindTargetById(kind_, id_);
@@ -68,14 +68,8 @@ namespace {
                     return t;
                 }
             }
-            Target t;
-            if (hadTarget && keepAimFacing != nullptr) {
-                t = world.PickInAimCone(from, maxRange, *keepAimFacing, DegreesToRadians(Config::RapidKeepAimDegrees),
-                                        world.TargetsOfSameKind(self), lightAndBulletsOnly);
-            }
-            if (t.kind == TargetKind::None) {
-                t = world.PickLockOnTarget(from, maxRange, bodiesFirst, world.TargetsOfSameKind(self), lightAndBulletsOnly);
-            }
+            const Target t = world.PickLockOnTarget(from, maxRange, priority, world.TargetsOfSameKind(self),
+                                                    hadTarget ? keepAimFacing : nullptr);
             kind_ = t.kind;
             id_ = t.id;
             return t;
@@ -160,6 +154,67 @@ namespace {
         float volleyTimer_ = 0.0f;
     };
 
+    // 砲塔（速射砲・ビーム砲）。砲は今向いている方向を持ち、狙う方向へ1秒間に決まった角度まで旋回する。
+    // 弾は狙う方向ではなく今向いている方向へ出る（旋回中も撃つ）。狙っていた相手がいなくなって、次の相手との
+    // 角度の差が TurretRetargetDegrees より大きいときは、撃つのをやめて速く旋回し、TurretResumeDegrees 以内で再開する
+    class Turret {
+    public:
+        Turret(float turnDegrees, float fastTurnDegrees) : turnDegrees_(turnDegrees), fastTurnDegrees_(fastTurnDegrees) {}
+
+        // 毎回呼ぶ。hasTarget：狙うものがいるか、desired：狙う方向、tracked：狙っている相手（特定の相手でなければ None）。
+        // snapOnEngage：待っている状態から狙うものが現れた瞬間に、すぐそちらを向く（速射砲の近接防御型）
+        void Update(World& world, bool hasTarget, float desired, const Target& tracked, bool snapOnEngage, float dt) {
+            hasTarget_ = hasTarget;
+            // 狙っていた相手がいなくなったかを見る（次の相手を狙うときの旋回の仕方を決めるため）
+            if (trackedKind_ != TargetKind::None && (tracked.kind != trackedKind_ || tracked.id != trackedId_) &&
+                world.FindTargetById(trackedKind_, trackedId_).kind == TargetKind::None) {
+                lostTarget_ = true;
+            }
+            trackedKind_ = tracked.kind;
+            trackedId_ = tracked.id;
+
+            if (snapOnEngage) {
+                if (hasTarget && !engaged_) {
+                    facing_ = desired;
+                    lostTarget_ = false;
+                    fastTurning_ = false;
+                }
+                engaged_ = hasTarget;
+            }
+            if (!hasTarget) {
+                return;  // 狙うものがいなければ、向きはそのまま
+            }
+            // 狙っていた相手がいなくなって次の相手を狙うとき：角度の差が大きければ、撃つのをやめて速く旋回する
+            if (lostTarget_) {
+                lostTarget_ = false;
+                if (std::fabs(WrapAngle(desired - facing_)) > DegreesToRadians(Config::TurretRetargetDegrees)) {
+                    fastTurning_ = true;
+                }
+            }
+            const float maxTurn = DegreesToRadians(fastTurning_ ? fastTurnDegrees_ : turnDegrees_) * dt;
+            facing_ = WrapAngle(facing_ + std::max(-maxTurn, std::min(maxTurn, WrapAngle(desired - facing_))));
+            if (fastTurning_ && std::fabs(WrapAngle(desired - facing_)) <= DegreesToRadians(Config::TurretResumeDegrees)) {
+                fastTurning_ = false;  // 向き直ったら、撃つのを再開してふだんの旋回に戻る
+            }
+        }
+
+        // 撃ってよいか（狙うものがいて、速く旋回している最中でない）
+        bool CanFire() const { return hasTarget_ && !fastTurning_; }
+        float Facing() const { return facing_; }
+        const float* FacingPtr() const { return &facing_; }
+
+    private:
+        float turnDegrees_;
+        float fastTurnDegrees_;
+        float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
+        bool hasTarget_ = false;     // 今、狙うものがいるか
+        bool engaged_ = false;       // snapOnEngage のとき：撃ち続けているか
+        TargetKind trackedKind_ = TargetKind::None;  // 前の回に狙っていた相手
+        int trackedId_ = 0;
+        bool lostTarget_ = false;    // 狙っていた相手がいなくなった
+        bool fastTurning_ = false;   // 撃つのをやめて速く旋回している
+    };
+
     // 速射砲の連装型で、横に並べる砲の数（4連装は2連装と同じ2門の並びで、発射速度を2倍にする）
     int RapidMounts(int barrels) {
         return barrels == 4 ? 2 : barrels;
@@ -174,14 +229,15 @@ namespace {
             : TimedWeapon(kind,
                           (kind.variant == WeaponVariant::RapidClose ? Config::RapidCloseInterval : Config::RapidGunInterval) /
                               static_cast<float>(kind.barrels),
-                          firstDelay) {}
+                          firstDelay),
+              turret_(Config::RapidTurnDegrees, Config::RapidFastTurnDegrees) {}
 
         bool HasTurret() const override { return true; }
         // 攻撃型は特定の相手を狙わない
         Target CurrentTarget() const override {
             return Kind().variant == WeaponVariant::RapidAttack ? Target() : lock_.Current();
         }
-        float TurretAngle() const override { return facing_; }
+        float TurretAngle() const override { return turret_.Facing(); }
 
     protected:
         void Tick(float dt) override {
@@ -201,60 +257,27 @@ namespace {
             }
             float desired = 0.0f;
             Target tracked;
-            hasTarget_ = DesiredAngle(world, desired, tracked);
-
-            // 狙っていた相手がいなくなったかを見る（次の相手を狙うときの旋回の仕方を決めるため）
-            if (trackedKind_ != TargetKind::None && (tracked.kind != trackedKind_ || tracked.id != trackedId_) &&
-                world.FindTargetById(trackedKind_, trackedId_).kind == TargetKind::None) {
-                lostTarget_ = true;
-            }
-            trackedKind_ = tracked.kind;
-            trackedId_ = tracked.id;
-
-            if (Kind().variant == WeaponVariant::RapidClose) {
-                // 近接防御型：ふだんは待ち、射程内に何か入った瞬間にそちらへ向き直って撃ち始める。
-                // 射程内に何もいなくなったら、撃つのをやめて待つ状態に戻る
-                if (hasTarget_ && !engaged_) {
-                    facing_ = desired;
-                    lostTarget_ = false;
-                    fastTurning_ = false;
-                }
-                engaged_ = hasTarget_;
-            }
-            if (!hasTarget_) {
-                return;  // 狙うものがいなければ、向きはそのまま
-            }
-
-            // 狙っていた相手がいなくなって次の相手を狙うとき：角度の差が大きければ、撃つのをやめて速く旋回する
-            if (lostTarget_) {
-                lostTarget_ = false;
-                if (std::fabs(WrapAngle(desired - facing_)) > DegreesToRadians(Config::RapidRetargetDegrees)) {
-                    fastTurning_ = true;
-                }
-            }
-            const float turnDegrees = fastTurning_ ? Config::RapidFastTurnDegrees : Config::RapidTurnDegrees;
-            const float maxTurn = DegreesToRadians(turnDegrees) * dt;
-            facing_ = WrapAngle(facing_ + std::max(-maxTurn, std::min(maxTurn, WrapAngle(desired - facing_))));
-            if (fastTurning_ && std::fabs(WrapAngle(desired - facing_)) <= DegreesToRadians(Config::RapidResumeDegrees)) {
-                fastTurning_ = false;  // 向き直ったら、撃つのを再開してふだんの旋回に戻る
-            }
+            const bool hasTarget = DesiredAngle(world, desired, tracked);
+            // 近接防御型：ふだんは待ち、射程内に何か入った瞬間にそちらへ向き直って撃ち始める
+            turret_.Update(world, hasTarget, desired, tracked, Kind().variant == WeaponVariant::RapidClose, dt);
         }
 
         // 弾は、狙う方向ではなく今向いている方向へ出る（旋回中も撃ち続ける）
         bool FireShot(World& world, int /*shot*/) override {
-            if (!hasTarget_ || fastTurning_) {
+            if (!turret_.CanFire()) {
                 return false;  // 狙うものがいないときと、速く旋回している間は撃たない
             }
+            const float facing = turret_.Facing();
             const Vec2 origin = world.GetCore().pos;
             // ほんの少しばらけて飛ぶ（収束を付けるほど小さくなる）
             const float spread = DegreesToRadians(Config::RapidGunSpreadDegrees) *
                                  std::pow(Config::RapidFocusMultiplier, static_cast<float>(CountPart(PartKind::Focus)));
-            const Vec2 side = Vec2::FromAngle(facing_).Perpendicular();
+            const Vec2 side = Vec2::FromAngle(facing).Perpendicular();
             // 並べた砲から1門ずつ順番に撃つ
             const int mounts = RapidMounts(Barrels());
             const int mount = mountIndex_ % mounts;
             mountIndex_ = (mountIndex_ + 1) % mounts;
-            const Vec2 dir = Vec2::FromAngle(facing_ + world.RandomRange(-spread, spread));
+            const Vec2 dir = Vec2::FromAngle(facing + world.RandomRange(-spread, spread));
             Bullet b;
             b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(mount, mounts, Config::RapidBarrelSpacing);
             b.vel = dir * Config::RapidGunBulletSpeed;
@@ -279,7 +302,7 @@ namespace {
                 if (Kind().variant == WeaponVariant::RapidAttack) {
                     if (!world.FindLightCrowdCenter(center)) return false;
                 } else {
-                    const Target target = lock_.Get(world, this, origin, NoRange, false, true, &facing_);
+                    const Target target = lock_.Get(world, this, origin, NoRange, TargetPriority::LightAndBullets, turret_.FacingPtr());
                     if (target.kind == TargetKind::None) return false;
                     center = target.pos;
                     tracked = target;
@@ -289,7 +312,7 @@ namespace {
             }
             case WeaponVariant::RapidClose: {
                 // 近接防御型：軽の敵と敵の弾だけを、射程内の近い順3つからロックオンし、先読みで狙う
-                const Target target = lock_.Get(world, this, origin, Config::RapidCloseRange, false, true, &facing_);
+                const Target target = lock_.Get(world, this, origin, Config::RapidCloseRange, TargetPriority::LightAndBullets, turret_.FacingPtr());
                 if (target.kind == TargetKind::None) return false;
                 tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
@@ -297,7 +320,7 @@ namespace {
             }
             default: {
                 // 基本型：軽の敵と敵の弾だけを、近い順3つからロックオンし、先読みで狙う
-                const Target target = lock_.Get(world, this, origin, NoRange, false, true, &facing_);
+                const Target target = lock_.Get(world, this, origin, NoRange, TargetPriority::LightAndBullets, turret_.FacingPtr());
                 if (target.kind == TargetKind::None) return false;
                 tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
@@ -307,29 +330,64 @@ namespace {
         }
 
         LockOn lock_;
-        float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
-        bool hasTarget_ = false;     // 今、狙うものがいるか
-        bool engaged_ = false;       // 近接防御型：撃ち続けているか
-        TargetKind trackedKind_ = TargetKind::None;  // 前の回に狙っていた相手
-        int trackedId_ = 0;
-        bool lostTarget_ = false;    // 狙っていた相手がいなくなった（次の相手を狙うときに旋回の仕方を決める）
-        bool fastTurning_ = false;   // 撃つのをやめて速く旋回している
+        Turret turret_;
         bool sweepReady_ = false;    // 往復の始まる位置と時間を決めたか
         float sweepAngle_ = 0.0f;    // 往復の位置（正弦波の角度。sin がー1〜1 で扇の端から端）
         float sweepPeriod_ = 1.0f;   // 1往復の時間（秒）
         int mountIndex_ = 0;  // 次に撃つ砲
     };
 
-    // ビーム砲。基本型は最も近い敵、攻撃型は敵が多い方向、決戦型はHPが最も高い敵を狙う。
-    // 連装型は、横に並べた砲から1門ずつ素早く続けて撃つ（1門ごとに狙い直す）
+    // ビーム砲。砲塔を持ち、狙う方向へゆっくり旋回して、今向いている方向へ撃つ（速射砲と同じ仕組み）。
+    // 3つの派生版とも、中・重を優先して狙う（中・重がいなければ軽、敵本体がいなければ敵の弾）。
+    // 基本型は近い順3体からロックオン、攻撃型は線の上に多く乗る（多く貫ける）相手をロックオン、決戦型は最大HPが最も高い敵。
+    // 連装型は、横に並べた砲から1門ずつ素早く続けて撃つ（最初の1門を撃った向きのまま平行に撃ち切る）
     class BeamGun : public TimedWeapon {
     public:
         BeamGun(const WeaponKind& kind, float firstDelay)
             : TimedWeapon(kind,
                           Config::BeamInterval * (kind.variant == WeaponVariant::BeamDecisive ? Config::BeamDecisiveIntervalScale : 1.0f),
-                          firstDelay, Config::BeamVolleyGap) {}
+                          firstDelay, Config::BeamVolleyGap),
+              turret_(Config::BeamTurnDegrees, Config::BeamFastTurnDegrees) {}
+
+        bool HasTurret() const override { return true; }
+        float TurretAngle() const override { return turret_.Facing(); }
+        // 今狙っている相手（同じ種類のほかのビーム砲と、狙いを分けるため）
+        Target CurrentTarget() const override {
+            if (Kind().variant == WeaponVariant::BeamBasic) return lock_.Current();
+            Target t;
+            t.kind = target_.kind;
+            t.id = target_.id;
+            return t;
+        }
 
     protected:
+        // 毎回、狙う相手と方向を決めて、そちらへ砲を旋回させる
+        void Think(World& world, float dt) override {
+            const Vec2 origin = world.GetCore().pos;
+            Target target;
+            switch (Kind().variant) {
+            case WeaponVariant::BeamAttack: {
+                // 多く貫ける相手をロックオンし、倒れるか消えるまで狙い続ける（毎回数え直すと重く、狙いもふらつくため）
+                const Target kept = (target_.kind != TargetKind::None) ? world.FindTargetById(target_.kind, target_.id) : Target();
+                target = (kept.kind != TargetKind::None) ? kept : world.FindPierceTarget(origin, world.TargetsOfSameKind(this));
+                break;
+            }
+            case WeaponVariant::BeamDecisive:
+                // 最大HPが最も高い敵（同じなら近い方）。今狙っている相手も最も高ければ、狙い続ける
+                target = world.FindHighestHpTarget(origin, world.TargetsOfSameKind(this), true, target_);
+                break;
+            default:
+                // 基本型：中・重 → 軽 → 敵の弾 の順に、近い順3体からロックオンする
+                target = lock_.Get(world, this, origin, NoRange, TargetPriority::MediumFirst, turret_.FacingPtr());
+                break;
+            }
+            target_ = target;
+            const bool hasTarget = (target.kind != TargetKind::None);
+            const float desired =
+                hasTarget ? AngleOf(LeadTarget(origin, target.pos, target.vel, Config::BeamSpeed) - origin) : turret_.Facing();
+            turret_.Update(world, hasTarget, desired, target, false, dt);
+        }
+
         bool FireShot(World& world, int shot) override {
             const Vec2 origin = world.GetCore().pos;
             if (shot > 0) {
@@ -337,28 +395,12 @@ namespace {
                 Launch(world, origin, volleyDir_, shot);
                 return true;
             }
-            Vec2 aim;
-            const bool crowd = Kind().variant == WeaponVariant::BeamAttack && world.FindCrowdCenter(aim);
-            if (!crowd) {
-                // 決戦型はHPが最も高い敵、攻撃型（敵本体がいないとき）は最も近いもの、
-                // 基本型は敵本体の近い順3体（本体がいなければ敵の弾）からロックオンする
-                Target target;
-                if (Kind().variant == WeaponVariant::BeamDecisive) {
-                    // 同じ種類のほかの武装が狙っている相手を除いて、HPが最も高い敵
-                    target = world.FindHighestHpTarget(origin, world.TargetsOfSameKind(this));
-                    decisiveTarget_ = target;
-                } else if (Kind().variant == WeaponVariant::BeamBasic) {
-                    target = lock_.Get(world, this, origin, NoRange, true);
-                } else {
-                    target = world.FindNearestTarget(origin);
-                }
-                if (target.kind == TargetKind::None) return false;
-                aim = LeadTarget(origin, target.pos, target.vel, Config::BeamSpeed);
+            if (!turret_.CanFire()) {
+                return false;  // 狙うものがいないときと、速く旋回している間は撃たない
             }
-            const Vec2 dir = (aim - origin).Normalized();
-            if (dir.LengthSq() <= 0.0f) return false;
-            volleyDir_ = dir;
-            Launch(world, origin, dir, 0);
+            // ビームは、狙う方向ではなく今向いている方向へ出る
+            volleyDir_ = Vec2::FromAngle(turret_.Facing());
+            Launch(world, origin, volleyDir_, 0);
             return true;
         }
 
@@ -367,30 +409,19 @@ namespace {
         void Launch(World& world, const Vec2& origin, const Vec2& dir, int shot) {
             const Vec2 side = dir.Perpendicular();
             const float scale = (Kind().variant == WeaponVariant::BeamDecisive) ? Config::BeamDecisiveDamageScale : 1.0f;
-            {
-                Beam b;
-                b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(shot, Barrels(), Config::BeamBarrelSpacing);
-                b.vel = dir * Config::BeamSpeed;
-                b.damage = Config::BeamDamage * scale * PowerScale(Config::PartPowerRate);
-                b.decay = std::min(Config::BeamDecayMax,
-                                   Config::BeamDecay + Config::BeamPierceDecayPerPart * static_cast<float>(CountPart(PartKind::Pierce)));
-                world.AddBeam(b);
-            }
+            Beam b;
+            b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(shot, Barrels(), Config::BeamBarrelSpacing);
+            b.vel = dir * Config::BeamSpeed;
+            b.damage = Config::BeamDamage * scale * PowerScale(Config::PartPowerRate);
+            b.decay = std::min(Config::BeamDecayMax,
+                               Config::BeamDecay + Config::BeamPierceDecayPerPart * static_cast<float>(CountPart(PartKind::Pierce)));
+            world.AddBeam(b);
         }
 
-        LockOn lock_;  // ロックオンしている相手
+        LockOn lock_;     // 基本型：ロックオンしている相手
+        Target target_;   // 今狙っている相手（攻撃型はこれをロックオンとして使う）
+        Turret turret_;
         Vec2 volleyDir_;  // 一斉射の向き（最初の1門を撃った向き）
-
-    public:
-        // 決戦型はHPが最も高い敵、基本型はロックオンしている相手（攻撃型は特定の相手を狙わない）
-        Target CurrentTarget() const override {
-            if (Kind().variant == WeaponVariant::BeamDecisive) return decisiveTarget_;
-            if (Kind().variant == WeaponVariant::BeamBasic) return lock_.Current();
-            return Target();
-        }
-
-    private:
-        Target decisiveTarget_;
     };
 
     // 誘導兵器。基本型は最も近い敵、攻撃型は敵が多い場所（爆発が大きい）を追いかける。
@@ -418,11 +449,11 @@ namespace {
                 break;
             case WeaponVariant::MissileClose:
                 // 近接防御型：近くの近い順3つ（敵本体と敵の弾を区別しない）からロックオンする
-                target = lock_.Get(world, this, origin, Config::MissileCloseRange, false);
+                target = lock_.Get(world, this, origin, Config::MissileCloseRange, TargetPriority::Any);
                 break;
             default:
                 // 基本型：敵本体と敵の弾を区別せずに、近い順3つからロックオンする
-                target = lock_.Get(world, this, origin, NoRange, false);
+                target = lock_.Get(world, this, origin, NoRange, TargetPriority::Any);
                 break;
             }
             if (target.kind == TargetKind::None) {
