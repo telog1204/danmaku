@@ -9,6 +9,12 @@ namespace Config {
     constexpr int ScreenWidth = 800;
     constexpr int ScreenHeight = 600;
 
+    // フィールド（敵や弾が動き回る広さ）。画面より広く、ViewScale 倍に縮めて画面に描く（カメラを引いた見え方）
+    // HP・時間などの表示は縮めない
+    constexpr int FieldWidth = 1600;
+    constexpr int FieldHeight = 1200;
+    constexpr float ViewScale = 0.5f;
+
     // ウィンドウの移動中などで1フレームが長引いたとき、時間が一気に進まないようにする上限（現実の秒）
     constexpr double MaxFrameSeconds = 0.1;
 
@@ -26,7 +32,7 @@ namespace Config {
 
     // 速射砲（基本型）
     constexpr float RapidGunInterval = 0.1f;      // 撃つ間隔（秒）
-    constexpr float RapidGunBulletSpeed = 600.0f; // 弾の速さ（ドット/秒）
+    constexpr float RapidGunBulletSpeed = 1500.0f; // 弾の速さ（ドット/秒）
     constexpr float RapidGunDamage = 1.0f;
     constexpr float RapidGunSpreadDegrees = 2.0f; // 狙いからずれる最大の角度（度）
     constexpr float RapidTurnDegrees = 360.0f;    // 砲が1秒間に旋回できる角度（度）
@@ -39,19 +45,19 @@ namespace Config {
 
     // ビーム砲（基本型）。敵を貫き、貫くたびに威力が下がる。長い尾を含めた線全体に当たり判定がある
     constexpr float BeamInterval = 0.3f;
-    constexpr float BeamSpeed = 1200.0f;
+    constexpr float BeamSpeed = 2400.0f;
     constexpr float BeamDamage = 12.0f;
     constexpr float BeamDecay = 0.7f;             // 1つ貫くごとに、威力がこの割合になる
-    constexpr float BeamTailLength = 80.0f;
+    constexpr float BeamTailLength = 320.0f;
     constexpr float BeamHalfWidth = 2.0f;         // 当たり判定の太さの半分
     constexpr int BeamEnergy = 30;
 
     // 誘導兵器（基本型）。撃ち出して一瞬まっすぐ進んでから追いかける。何かに当たると小さな爆発を起こす
     constexpr float MissileInterval = 0.8f;
-    constexpr float MissileSpeed = 600.0f;
+    constexpr float MissileSpeed = 1500.0f;
     constexpr float MissileDamage = 12.0f;
     constexpr float MissileTurnDegrees = 360.0f;  // 1秒間に曲がれる角度（度）
-    constexpr float MissileStraightSeconds = 0.15f; // 撃ち出してからまっすぐ進む時間（近接防御型はまっすぐ進まない）
+    constexpr float MissileStraightSeconds = 0.25f; // 撃ち出してからまっすぐ進む時間（近接防御型はまっすぐ進まない）。この間は爆発に巻き込まれない
     constexpr float MissileViewDegrees = 120.0f;  // 誘導弾が見える前方の範囲（度。左右に半分ずつ）。後ろ側は見えない
     constexpr int MissileTargetCap = 3;           // 同じ種類の武装から出た誘導弾が、同じ相手を狙える数
     constexpr float MissileRadius = 4.0f;
@@ -63,7 +69,7 @@ namespace Config {
 
     // 炸裂弾（基本型）。敵が多い場所の少し手前で炸裂し、残る爆炎と、前方へ円錐形の破片を出す
     constexpr float ShellInterval = 1.2f;
-    constexpr float ShellSpeed = 500.0f;
+    constexpr float ShellSpeed = 1250.0f;
     constexpr float ShellRadius = 5.0f;
     constexpr float ShellDirectDamage = 15.0f;    // 直撃した敵への威力
     constexpr float ShellShortDistance = 30.0f;   // 敵が多い場所の中心から、どれだけ手前で炸裂するか
@@ -73,7 +79,7 @@ namespace Config {
     constexpr float ShellFlameSeconds = 0.4f;     // 爆炎がその場に残る時間
     constexpr int ShellFragmentCount = 14;
     constexpr float ShellFragmentSpreadDegrees = 30.0f; // 破片が広がる角度（片側）
-    constexpr float ShellFragmentSpeed = 400.0f;
+    constexpr float ShellFragmentSpeed = 1000.0f;
     constexpr float ShellFragmentSeconds = 0.4f;  // 破片が飛ぶ時間
     constexpr float ShellFragmentDamage = 2.0f;
     constexpr float FragmentRadius = 2.0f;
@@ -83,7 +89,7 @@ namespace Config {
     constexpr float RapidSweepDegrees = 30.0f;       // 速射砲 弾幕型・攻撃型：扇形に往復する幅（片側の角度）
     constexpr float RapidSweepSpeedDegrees = 120.0f; // 往復する速さ（度/秒）
     constexpr float RapidCloseInterval = 0.05f;      // 速射砲 近接防御型：撃つ間隔
-    constexpr float RapidCloseRange = 150.0f;        // 速射砲 近接防御型：この距離に何か入ったら撃ち始め、いなくなったらやめる
+    constexpr float RapidCloseRange = 300.0f;        // 速射砲 近接防御型：この距離に何か入ったら撃ち始め、いなくなったらやめる
     constexpr int RapidBarrageEnergy = 10;
     constexpr int RapidAttackEnergy = 10;
     constexpr int RapidCloseEnergy = 20;
@@ -92,10 +98,10 @@ namespace Config {
     constexpr int BeamAttackEnergy = 30;
     constexpr int BeamDecisiveEnergy = 30;
     constexpr float MissileAttackBlastScale = 2.0f;  // 誘導兵器 攻撃型：消えるときの爆発の半径（基本型に対する倍率）
-    constexpr float MissileCloseRange = 180.0f;      // 誘導兵器 近接防御型：この距離に来たものだけを撃つ
+    constexpr float MissileCloseRange = 360.0f;      // 誘導兵器 近接防御型：この距離に来たものだけを撃つ
     constexpr int MissileAttackEnergy = 20;
     constexpr int MissileCloseEnergy = 20;
-    constexpr float ShellDecisiveRange = 2000.0f;    // 炸裂弾 決戦型：直撃を狙うので、途中で炸裂しない距離にする
+    constexpr float ShellDecisiveRange = 4000.0f;    // 炸裂弾 決戦型：直撃を狙うので、途中で炸裂しない距離にする
     constexpr int ShellDecisiveEnergy = 30;
 
     // 連装型
@@ -135,9 +141,9 @@ namespace Config {
     constexpr int ExpFirstNeed = 10;               // 最初のエネルギー上限解放パーツが出るまでに必要な経験値
     constexpr int ExpNeedGrowth = 5;               // 1つ出るたびに、次に必要な経験値が増える量
     constexpr float PickupWaitSeconds = 0.3f;      // 落ちた場所にとどまる時間
-    constexpr float PickupStartSpeed = 200.0f;     // コアへ吸い寄せられ始める速さ
-    constexpr float PickupAcceleration = 600.0f;
-    constexpr float PickupMaxSpeed = 700.0f;
+    constexpr float PickupStartSpeed = 400.0f;     // コアへ吸い寄せられ始める速さ
+    constexpr float PickupAcceleration = 1200.0f;
+    constexpr float PickupMaxSpeed = 1400.0f;
     constexpr float PickupRadius = 8.0f;
     constexpr float MessageSeconds = 2.0f;         // 拾ったものを画面の上に表示する時間
 
@@ -145,37 +151,37 @@ namespace Config {
     constexpr float SpawnIntervalStart = 1.5f;
     constexpr float SpawnIntervalMin = 0.4f;
     constexpr float SpawnIntervalShrinkPerSecond = 0.01f;
-    constexpr float SpawnMargin = 30.0f;          // 画面の外のどれだけ離れた位置から現れるか
+    constexpr float SpawnMargin = 60.0f;          // フィールドの外のどれだけ離れた位置から現れるか
     constexpr float EnemyHpGrowthSeconds = 60.0f; // この秒数ごとに、敵のHPが元の値1つ分ずつ増える
 
     // 敵の弾
-    constexpr float EnemyBulletSpeed = 150.0f;
+    constexpr float EnemyBulletSpeed = 375.0f;
     constexpr float EnemyBulletRadius = 4.0f;
     constexpr int EnemyBulletDamage = 5;
 
     // 敵の動き（航空機のような動き）。常に機首の向きへ進み、向きと速さは少しずつしか変えられない
-    constexpr float EnemyAcceleration = 80.0f;    // 速さを変えられる量（ドット/秒を1秒あたり）
-    constexpr float EnemyEdgeMargin = 60.0f;      // 画面の端からこの距離に入ったら、旋回して内側へ戻る
+    constexpr float EnemyAcceleration = 160.0f;    // 速さを変えられる量（ドット/秒を1秒あたり）
+    constexpr float EnemyEdgeMargin = 120.0f;     // フィールドの端からこの距離に入ったら、旋回して内側へ戻る
 
     // 敵の区分（軽・中・重）。受けるダメージ＝攻撃力−防御力（最低でも攻撃力のこの割合は通る）
     constexpr float MinDamageRate = 0.1f;
     // 軽：どの攻撃でも1発で倒せる。速く、同じ型がまとまって現れ、当たりそうな弾を旋回してかわす
-    constexpr float LightSpeed = 130.0f;
+    constexpr float LightSpeed = 325.0f;
     constexpr float LightTurnDegrees = 180.0f;    // 1秒間に曲がれる角度（度）
-    constexpr float LightDodgeSpeed = 180.0f;     // 避けるときに加速する速さの上限
+    constexpr float LightDodgeSpeed = 450.0f;     // 避けるときに加速する速さの上限
     constexpr float LightRadius = 8.0f;
     constexpr int LightExp = 1;
     constexpr int LightGroupMin = 3;              // まとまって現れる数
     constexpr int LightGroupMax = 5;
     // 中：遅く、防御力がある
-    constexpr float MediumSpeed = 42.0f;
+    constexpr float MediumSpeed = 84.0f;
     constexpr float MediumTurnDegrees = 42.0f;
     constexpr float MediumRadius = 12.0f;
     constexpr float MediumHp = 4.0f;              // 元のHP（時間とともに増える）
     constexpr float MediumDefense = 0.9f;
     constexpr int MediumExp = 2;
     // 重：とても遅く、硬い。艦隊の旗艦としてだけ現れる
-    constexpr float HeavySpeed = 30.0f;
+    constexpr float HeavySpeed = 60.0f;
     constexpr float HeavyTurnDegrees = 30.0f;
     constexpr float HeavyRadius = 19.0f;
     constexpr float HeavyHp = 12.0f;
@@ -185,8 +191,8 @@ namespace Config {
 
     // 軽の型
     constexpr float StraferShotInterval = 1.5f;   // 離脱型：コアへ向かいながら撃つ間隔
-    constexpr float StraferBreakDistance = 120.0f; // 離脱型：ここまで近づいたら旋回して離れる
-    constexpr float StraferReturnDistance = 300.0f; // 離脱型：ここまで離れたら、またコアへ向かう
+    constexpr float StraferBreakDistance = 240.0f; // 離脱型：ここまで近づいたら旋回して離れる
+    constexpr float StraferReturnDistance = 600.0f; // 離脱型：ここまで離れたら、またコアへ向かう
     constexpr int KamikazeRamDamage = 10;         // 自爆型：コアに体当たりしたときのダメージ
     // 当たりそうな弾をかわす動き（軽の敵すべて）
     constexpr float DodgeLookAheadSeconds = 0.8f; // 何秒先までの弾の進路を見るか
@@ -196,13 +202,13 @@ namespace Config {
     constexpr float DodgeMissChance = 0.3f;       // 見直したときに、弾を見落とす確率
 
     // 中・重の型
-    constexpr float GunshipKeepDistance = 280.0f; // 基本型：コアからこの距離の円を旋回する
+    constexpr float GunshipKeepDistance = 560.0f; // 基本型：コアからこの距離の円を旋回する
     constexpr float GunshipShotInterval = 1.0f;   // 基本型：弾を撃つ間隔（重は3発を扇形に）
     constexpr int HeavyShotCount = 3;
     constexpr float HeavyShotSpreadDegrees = 12.0f;
-    constexpr float TorpedoKeepDistance = 300.0f; // 雷撃型
+    constexpr float TorpedoKeepDistance = 600.0f; // 雷撃型
     constexpr float TorpedoInterval = 4.0f;       // 雷撃型：敵の誘導弾を撃つ間隔（重は3発を扇形に）
-    constexpr float CarrierKeepDistance = 320.0f; // 空母型
+    constexpr float CarrierKeepDistance = 640.0f; // 空母型
     constexpr float CarrierInterval = 6.0f;       // 空母型：軽の敵を生み出す間隔
     constexpr int CarrierLaunchCount = 3;         // 空母型（中）が1回に生み出す数と、同時に出ていられる数
     constexpr int CarrierMaxChildren = 9;
@@ -211,7 +217,7 @@ namespace Config {
     constexpr int RamDamage = 10;                 // 中・重がコアにぶつかったときのダメージ（ぶつかった敵は消える）
 
     // 敵の誘導弾（雷撃型が撃つ）。敵の弾と同じ扱い（HP1）で、コアを追いかける
-    constexpr float EnemyMissileSpeed = 220.0f;
+    constexpr float EnemyMissileSpeed = 550.0f;
     constexpr float EnemyMissileTurnDegrees = 120.0f;
     constexpr float EnemyMissileLifeSeconds = 6.0f;
     constexpr float EnemyMissileRadius = 5.0f;

@@ -73,7 +73,7 @@ namespace {
         return push.Normalized();
     }
 
-    // 一度画面に入った敵は、端に近づいたら行きたい向きを内側へ寄せる（近いほど強く）
+    // 一度フィールドに入った敵は、端に近づいたら行きたい向きを内側へ寄せる（近いほど強く）
     Vec2 AvoidEdges(const Enemy& e, const Vec2& desired) {
         if (!e.entered) {
             return desired;
@@ -81,9 +81,9 @@ namespace {
         const float m = Config::EnemyEdgeMargin;
         Vec2 inward;
         if (e.pos.x < m) inward.x += (m - e.pos.x) / m;
-        if (e.pos.x > Config::ScreenWidth - m) inward.x -= (e.pos.x - (Config::ScreenWidth - m)) / m;
+        if (e.pos.x > Config::FieldWidth - m) inward.x -= (e.pos.x - (Config::FieldWidth - m)) / m;
         if (e.pos.y < m) inward.y += (m - e.pos.y) / m;
-        if (e.pos.y > Config::ScreenHeight - m) inward.y -= (e.pos.y - (Config::ScreenHeight - m)) / m;
+        if (e.pos.y > Config::FieldHeight - m) inward.y -= (e.pos.y - (Config::FieldHeight - m)) / m;
         if (inward.LengthSq() <= 0.0f) {
             return desired;
         }
@@ -226,9 +226,9 @@ namespace {
         }
     }
 
-    bool IsInsideScreen(const Vec2& p, float margin) {
+    bool IsInsideField(const Vec2& p, float margin) {
         return p.x >= margin && p.y >= margin &&
-               p.x <= Config::ScreenWidth - margin && p.y <= Config::ScreenHeight - margin;
+               p.x <= Config::FieldWidth - margin && p.y <= Config::FieldHeight - margin;
     }
 }
 
@@ -253,7 +253,7 @@ void UpdateEnemy(Enemy& e, World& world, float dt) {
 
     e.pos += e.vel * dt;
 
-    if (!e.entered && IsInsideScreen(e.pos, e.radius)) {
+    if (!e.entered && IsInsideField(e.pos, e.radius)) {
         e.entered = true;
     }
 }

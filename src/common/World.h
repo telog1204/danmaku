@@ -8,7 +8,7 @@
 #include "Vec2.h"
 #include "Weapon.h"
 
-// 画面中央のコア。動かない
+// フィールド中央のコア。動かない
 struct Core {
     Vec2 pos;
     float radius = 0.0f;
@@ -23,7 +23,7 @@ struct Bullet {
     Vec2 vel;
     float radius = 0.0f;
     float damage = 0.0f;
-    float life = -1.0f;  // 残りの飛ぶ時間（秒）。負なら画面の外へ出るまで飛ぶ
+    float life = -1.0f;  // 残りの飛ぶ時間（秒）。負ならフィールドの外へ出るまで飛ぶ
     bool homing = false; // 敵の誘導弾：コアを追いかける
     float pierceChance = 0.0f; // 当たったときに貫く確率（速射砲の貫徹力強化）
     int lastHitId = 0;   // 最後に貫いた相手の番号（同じ相手に続けて当たらないように）
@@ -142,7 +142,7 @@ struct Enemy {
     bool alive = true;
     float heading = 0.0f;      // 機首の向き（ラジアン）。常にこの向きへ進む
     float speed = 0.0f;        // 今の速さ（ドット/秒）
-    bool entered = false;      // 一度画面の中に入ったか（入ったあとは、画面の端で旋回して内側へ戻る）
+    bool entered = false;      // 一度フィールドの中に入ったか（入ったあとは、フィールドの端で旋回して内側へ戻る）
     float shotTimer = 0.0f;    // 次に撃つまでの時間（秒）
     float orbitDir = 1.0f;     // コアの周りを回る向き（1：左回り、−1：右回り）
     float reactionTimer = 0.0f; // 軽：次に弾を見直すまでの時間（秒）

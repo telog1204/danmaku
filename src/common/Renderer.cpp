@@ -6,17 +6,21 @@
 #include "World.h"
 
 namespace {
-    int Px(float v) { return static_cast<int>(std::lround(v)); }
+    // フィールドの位置を画面の位置にする（カメラを引いて、ViewScale 倍に縮めて描く）
+    int Px(float v) { return static_cast<int>(std::lround(v * Config::ViewScale)); }
+
+    // フィールドの大きさ（半径・長さ）を画面の大きさにする。小さくなりすぎて消えないように、最低1ドットにする
+    int Sz(float v) { return std::max(1, static_cast<int>(std::lround(v * Config::ViewScale))); }
 
     // 光って見える丸。加算合成で、薄い大きな丸の上に明るい丸を重ねる
     void DrawGlowCircle(const Vec2& p, float r, int cr, int cg, int cb) {
-        DrawCircle(Px(p.x), Px(p.y), Px(r * 2.2f), GetColor(cr / 5, cg / 5, cb / 5), TRUE);
-        DrawCircle(Px(p.x), Px(p.y), Px(r), GetColor(cr, cg, cb), TRUE);
+        DrawCircle(Px(p.x), Px(p.y), Sz(r * 2.2f), GetColor(cr / 5, cg / 5, cb / 5), TRUE);
+        DrawCircle(Px(p.x), Px(p.y), Sz(r), GetColor(cr, cg, cb), TRUE);
     }
 
     void DrawCore(const Core& core) {
         DrawGlowCircle(core.pos, core.radius, 80, 220, 255);
-        DrawCircle(Px(core.pos.x), Px(core.pos.y), Px(core.radius + 6.0f), GetColor(40, 120, 160), FALSE, 2);
+        DrawCircle(Px(core.pos.x), Px(core.pos.y), Sz(core.radius + 6.0f), GetColor(40, 120, 160), FALSE, Sz(2.0f));
     }
 
     // 機首の向きを指す三角（大きさ size、色 c）
@@ -33,35 +37,35 @@ namespace {
     void DrawEnemy(const Enemy& e) {
         const int x = Px(e.pos.x);
         const int y = Px(e.pos.y);
-        const int r = Px(e.radius);
+        const int r = Sz(e.radius);
         switch (e.type) {
         case EnemyType::Strafer:
             // 離脱型：紫の矢じり
-            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(45, 10, 50), TRUE);
+            DrawCircle(x, y, Sz(e.radius * 2.0f), GetColor(45, 10, 50), TRUE);
             DrawArrow(e, e.radius, GetColor(230, 80, 255));
             break;
         case EnemyType::Kamikaze:
             // 自爆型：赤い矢じり
-            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(50, 10, 10), TRUE);
+            DrawCircle(x, y, Sz(e.radius * 2.0f), GetColor(50, 10, 10), TRUE);
             DrawArrow(e, e.radius, GetColor(255, 70, 60));
             break;
         case EnemyType::Gunship:
             // 基本型：オレンジの四角
-            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(50, 30, 5), TRUE);
+            DrawCircle(x, y, Sz(e.radius * 2.0f), GetColor(50, 30, 5), TRUE);
             DrawBox(x - r, y - r, x + r, y + r, GetColor(255, 160, 40), TRUE);
             break;
         case EnemyType::Torpedo:
             // 雷撃型：緑の四角に、機首の向きを指す線
-            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(10, 45, 25), TRUE);
+            DrawCircle(x, y, Sz(e.radius * 2.0f), GetColor(10, 45, 25), TRUE);
             DrawBox(x - r, y - r, x + r, y + r, GetColor(80, 220, 130), TRUE);
             {
                 const Vec2 tip = e.pos + Vec2::FromAngle(e.heading) * (e.radius * 1.6f);
-                DrawLine(x, y, Px(tip.x), Px(tip.y), GetColor(160, 255, 190), 3);
+                DrawLine(x, y, Px(tip.x), Px(tip.y), GetColor(160, 255, 190), Sz(3.0f));
             }
             break;
         case EnemyType::Carrier:
             // 空母型：青い横長の板（機首の向きに長い）
-            DrawCircle(x, y, Px(e.radius * 2.0f), GetColor(10, 25, 55), TRUE);
+            DrawCircle(x, y, Sz(e.radius * 2.0f), GetColor(10, 25, 55), TRUE);
             {
                 const Vec2 f = Vec2::FromAngle(e.heading) * (e.radius * 1.4f);
                 const Vec2 s = Vec2::FromAngle(e.heading).Perpendicular() * (e.radius * 0.7f);
@@ -73,16 +77,16 @@ namespace {
             break;
         }
         if (e.cls == EnemyClass::Heavy) {
-            DrawCircle(x, y, Px(e.radius * 1.5f), GetColor(200, 200, 220), FALSE, 2);
+            DrawCircle(x, y, Sz(e.radius * 1.5f), GetColor(200, 200, 220), FALSE, Sz(2.0f));
         }
         if (e.grandFlagship) {
-            DrawCircle(x, y, Px(e.radius * 1.9f), GetColor(255, 210, 80), FALSE, 2);
+            DrawCircle(x, y, Sz(e.radius * 1.9f), GetColor(255, 210, 80), FALSE, Sz(2.0f));
         }
         // HPが減っていたら、残りを細い線で出す（大艦隊の旗艦は画面の上に出すので出さない）
         if (e.hp < e.maxHp && !e.grandFlagship && e.cls != EnemyClass::Light) {
             const int w = r * 2;
             const int filled = static_cast<int>(w * std::max(0.0f, e.hp) / e.maxHp);
-            DrawBox(x - r, y - r - 7, x - r + filled, y - r - 5, GetColor(120, 255, 120), TRUE);
+            DrawBox(x - r, y - r - Sz(7.0f), x - r + filled, y - r - Sz(7.0f) + Sz(2.0f), GetColor(120, 255, 120), TRUE);
         }
     }
 
@@ -93,7 +97,7 @@ namespace {
         const Vec2 tip = b.pos + f * 8.0f;
         const Vec2 left = b.pos - f * 5.0f + s * 3.5f;
         const Vec2 right = b.pos - f * 5.0f - s * 3.5f;
-        DrawCircle(Px(b.pos.x), Px(b.pos.y), 9, GetColor(60, 15, 30), TRUE);
+        DrawCircle(Px(b.pos.x), Px(b.pos.y), Sz(9.0f), GetColor(60, 15, 30), TRUE);
         DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 110, 150), TRUE);
     }
 
@@ -157,9 +161,9 @@ namespace {
 
     void DrawBeam(const Beam& b) {
         const Vec2 tail = b.Tail();
-        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(30, 60, 90), 7);
-        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(150, 220, 255), 3);
-        DrawCircle(Px(b.pos.x), Px(b.pos.y), 3, GetColor(255, 255, 255), TRUE);
+        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(30, 60, 90), Sz(7.0f));
+        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(150, 220, 255), Sz(3.0f));
+        DrawCircle(Px(b.pos.x), Px(b.pos.y), Sz(3.0f), GetColor(255, 255, 255), TRUE);
     }
 
     void DrawMissile(const Missile& m) {
@@ -170,7 +174,7 @@ namespace {
         const Vec2 left = m.pos - f * 5.0f + s * 3.0f;
         const Vec2 right = m.pos - f * 5.0f - s * 3.0f;
         const Vec2 flame = m.pos - f * 9.0f;
-        DrawCircle(Px(flame.x), Px(flame.y), 3, GetColor(90, 50, 10), TRUE);
+        DrawCircle(Px(flame.x), Px(flame.y), Sz(3.0f), GetColor(90, 50, 10), TRUE);
         DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 230, 90), TRUE);
     }
 
@@ -192,16 +196,16 @@ namespace {
         switch (p.kind) {
         case PickupKind::Energy:
             // 黄色のひし形
-            DrawCircle(x, y, 14, GetColor(60, 50, 20), TRUE);
-            DrawTriangle(x, y - 9, x - 9, y, x + 9, y, GetColor(255, 215, 106), TRUE);
-            DrawTriangle(x, y + 9, x - 9, y, x + 9, y, GetColor(255, 215, 106), TRUE);
+            DrawCircle(x, y, Sz(14.0f), GetColor(60, 50, 20), TRUE);
+            DrawTriangle(x, y - Sz(9.0f), x - Sz(9.0f), y, x + Sz(9.0f), y, GetColor(255, 215, 106), TRUE);
+            DrawTriangle(x, y + Sz(9.0f), x - Sz(9.0f), y, x + Sz(9.0f), y, GetColor(255, 215, 106), TRUE);
             break;
         case PickupKind::Weapon:
             // 白い四角（ふちは系統の色）
             FamilyColor(p.family, r, g, b);
-            DrawCircle(x, y, 14, GetColor(r / 5, g / 5, b / 5), TRUE);
-            DrawBox(x - 8, y - 8, x + 9, y + 9, GetColor(r, g, b), TRUE);
-            DrawBox(x - 5, y - 5, x + 6, y + 6, GetColor(255, 255, 255), TRUE);
+            DrawCircle(x, y, Sz(14.0f), GetColor(r / 5, g / 5, b / 5), TRUE);
+            DrawBox(x - Sz(8.0f), y - Sz(8.0f), x + Sz(8.0f) + 1, y + Sz(8.0f) + 1, GetColor(r, g, b), TRUE);
+            DrawBox(x - Sz(5.0f), y - Sz(5.0f), x + Sz(5.0f) + 1, y + Sz(5.0f) + 1, GetColor(255, 255, 255), TRUE);
             break;
         case PickupKind::Part:
             // 小さな丸（系統の色）
@@ -215,8 +219,8 @@ namespace {
         // 残り時間が少ないほど暗くする
         const float k = x.maxLife > 0.0f ? std::max(0.0f, x.life / x.maxLife) : 0.0f;
         const int bright = static_cast<int>(60 + 140 * k);
-        DrawCircle(Px(x.pos.x), Px(x.pos.y), Px(x.radius), GetColor(bright, bright * 2 / 5, bright / 8), TRUE);
-        DrawCircle(Px(x.pos.x), Px(x.pos.y), Px(x.radius * 0.5f), GetColor(bright, bright * 3 / 5, bright / 4), TRUE);
+        DrawCircle(Px(x.pos.x), Px(x.pos.y), Sz(x.radius), GetColor(bright, bright * 2 / 5, bright / 8), TRUE);
+        DrawCircle(Px(x.pos.x), Px(x.pos.y), Sz(x.radius * 0.5f), GetColor(bright, bright * 3 / 5, bright / 4), TRUE);
     }
 
 }
