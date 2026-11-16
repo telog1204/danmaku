@@ -159,12 +159,10 @@ namespace {
         }
     }
 
-    // 速射砲の弾：ビームを短くしたような赤い筋（進む向きの後ろへ尾を伸ばす。当たり判定は丸のまま）
+    // 速射砲の弾：赤一色の短い線（進む向きの後ろへ尾を伸ばす。当たり判定は丸のまま）
     void DrawRapidBullet(const Bullet& b) {
         const Vec2 tail = b.pos - b.vel.Normalized() * Config::RapidBulletTailLength;
-        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(80, 15, 10), Sz(5.0f));
-        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(255, 60, 40), Sz(2.0f));
-        DrawCircle(Px(b.pos.x), Px(b.pos.y), Sz(2.0f), GetColor(255, 200, 180), TRUE);
+        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(255, 60, 40), Sz(3.0f));
     }
 
     void DrawBeam(const Beam& b) {

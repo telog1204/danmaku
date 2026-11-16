@@ -41,7 +41,7 @@ namespace Config {
     constexpr float RapidFastTurnDegrees = 720.0f; // そのときの旋回の速さ（度/秒）
     constexpr float RapidResumeDegrees = 10.0f;    // 角度の差がこれ以内になったら、撃つのを再開してふだんの旋回に戻る
     constexpr float PlayerBulletRadius = 3.0f;
-    constexpr float RapidBulletTailLength = 24.0f; // 弾の見た目の尾の長さ（短いビームのように描く。当たり判定は丸のまま）
+    constexpr float RapidBulletTailLength = 24.0f; // 弾の見た目の長さ（赤一色の短い線で描く。当たり判定は丸のまま）
     constexpr int RapidGunEnergy = 10;
 
     // ビーム砲（基本型）。敵を貫き、貫くたびに威力が下がる。長い尾を含めた線全体に当たり判定がある
