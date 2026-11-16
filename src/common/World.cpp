@@ -339,44 +339,60 @@ namespace {
         }
         return false;
     }
+
+    using TargetFilter = std::function<bool(const Target&)>;
+
+    // 狙う相手の優先の仕方を、上から順に見る区分の並びにする
+    std::vector<TargetFilter> PriorityTiers(TargetPriority priority) {
+        const auto isBullet = [](const Target& t) { return t.kind == TargetKind::EnemyBullet; };
+        switch (priority) {
+        case TargetPriority::LightAndBullets:
+            return { [isBullet](const Target& t) { return isBullet(t) || t.light; } };
+        case TargetPriority::MediumFirst:
+            return { [](const Target& t) { return t.kind == TargetKind::Enemy && !t.light; },
+                     [](const Target& t) { return t.kind == TargetKind::Enemy && t.light; },
+                     isBullet };
+        case TargetPriority::Any:
+            break;
+        }
+        return { [](const Target&) { return true; } };
+    }
 }
 
-Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude,
-                               bool lightAndBulletsOnly) {
-    // 速射砲は、軽の敵と敵の弾だけを狙う（中・重にはほとんど効かないため）
-    const auto allowed = [lightAndBulletsOnly](const Target& t) {
-        return !lightAndBulletsOnly || t.kind == TargetKind::EnemyBullet || t.light;
-    };
-    std::vector<Target> candidates = FindNearestCandidates(
-        from, maxRange, bodiesFirst, Config::LockOnCandidates,
-        [&exclude, &allowed](const Target& t) { return allowed(t) && !Contains(exclude, t); });
-    if (candidates.empty()) {
-        // 外すと候補がなくなるときは、ほかの武装と重なっても狙う
-        candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates, allowed);
-    }
-    if (candidates.empty()) {
-        return Target();
-    }
-    return candidates[std::uniform_int_distribution<size_t>(0, candidates.size() - 1)(rng_)];
-}
+Target World::PickLockOnTarget(const Vec2& from, float maxRange, TargetPriority priority, const std::vector<Target>& exclude,
+                               const float* keepAimFacing) {
+    for (const TargetFilter& tier : PriorityTiers(priority)) {
+        // この区分の相手がいなければ、次の区分を見る
+        const std::vector<Target> inTier = FindNearestCandidates(from, maxRange, false, static_cast<size_t>(-1), tier);
+        if (inTier.empty()) continue;
 
-Target World::PickInAimCone(const Vec2& from, float maxRange, float facing, float coneRadians, const std::vector<Target>& exclude,
-                           bool lightAndBulletsOnly) const {
-    const std::vector<Target> inRange = FindNearestCandidates(
-        from, maxRange, false, static_cast<size_t>(-1), [&exclude, lightAndBulletsOnly](const Target& t) {
-            return (!lightAndBulletsOnly || t.kind == TargetKind::EnemyBullet || t.light) && !Contains(exclude, t);
-        });
-    Target best;
-    float bestDiff = coneRadians;
-    for (const Target& t : inRange) {
-        const Vec2 to = t.pos - from;
-        const float diff = std::fabs(WrapAngle(std::atan2(to.y, to.x) - facing));
-        if (diff <= bestDiff) {
-            best = t;
-            bestDiff = diff;
+        // 1回目は exclude の相手を外して選び、外すと候補がなくなるときは、ほかの武装と重なっても選ぶ
+        for (int pass = 0; pass < 2; ++pass) {
+            std::vector<Target> pool;
+            for (const Target& t : inTier) {
+                if (pass == 1 || !Contains(exclude, t)) pool.push_back(t);
+            }
+            if (pool.empty()) continue;
+            if (keepAimFacing != nullptr) {
+                // 旋回せずに狙える相手（今の向きから一定の角度以内で、角度の差が最も小さいもの）を優先する
+                Target best;
+                float bestDiff = Config::TurretKeepAimDegrees * Pi / 180.0f;
+                for (const Target& t : pool) {
+                    const Vec2 to = t.pos - from;
+                    const float diff = std::fabs(WrapAngle(std::atan2(to.y, to.x) - *keepAimFacing));
+                    if (diff <= bestDiff) {
+                        best = t;
+                        bestDiff = diff;
+                    }
+                }
+                if (best.kind != TargetKind::None) return best;
+            }
+            // 近い順に3番目までの中からランダムに選ぶ（inTier は近い順に並んでいる）
+            const size_t n = std::min(pool.size(), Config::LockOnCandidates);
+            return pool[std::uniform_int_distribution<size_t>(0, n - 1)(rng_)];
         }
     }
-    return best;
+    return Target();
 }
 
 std::vector<Target> World::TargetsOfSameKind(const Weapon* self) const {
@@ -392,30 +408,95 @@ std::vector<Target> World::TargetsOfSameKind(const Weapon* self) const {
     return targets;
 }
 
-Target World::FindHighestHpTarget(const Vec2& from, const std::vector<Target>& exclude) const {
-    Target best;
-    float bestHp = 0.0f;
-    for (int pass = 0; pass < 2 && best.kind == TargetKind::None; ++pass) {
+namespace {
+    Target TargetOf(const Enemy& e) {
+        Target t;
+        t.kind = TargetKind::Enemy;
+        t.id = e.id;
+        t.pos = e.pos;
+        t.vel = e.vel;
+        t.light = (e.cls == EnemyClass::Light);
+        return t;
+    }
+}
+
+Target World::FindHighestHpTarget(const Vec2& from, const std::vector<Target>& exclude, bool mediumFirst,
+                                  const Target& keep) const {
+    // 調べる区分：mediumFirst なら 中・重 → 軽、そうでなければ敵本体すべて
+    for (int tier = 0; tier < (mediumFirst ? 2 : 1); ++tier) {
+        const auto inTier = [mediumFirst, tier](const Enemy& e) {
+            return !mediumFirst || ((e.cls == EnemyClass::Light) == (tier == 1));
+        };
         // 1回目は exclude の相手を除いて探し、見つからなければ2回目は除かずに探す
-        for (const Enemy& e : enemies_) {
-            if (!e.alive) continue;
-            Target t;
-            t.kind = TargetKind::Enemy;
-            t.id = e.id;
-            if (pass == 0 && Contains(exclude, t)) continue;
-            if (best.kind == TargetKind::None || e.hp > bestHp) {
-                best.kind = TargetKind::Enemy;
-                best.id = e.id;
-                best.pos = e.pos;
-                best.vel = e.vel;
-                bestHp = e.hp;
+        for (int pass = 0; pass < 2; ++pass) {
+            const Enemy* best = nullptr;
+            float bestDistSq = 0.0f;
+            for (const Enemy& e : enemies_) {
+                if (!e.alive || !inTier(e)) continue;
+                if (pass == 0 && Contains(exclude, TargetOf(e))) continue;
+                const float d = (e.pos - from).LengthSq();
+                // 最大HPで比べる（削られても変わらないので、一度選んだ相手を倒すまで狙い続けやすい）。同じなら近い方
+                if (best == nullptr || e.maxHp > best->maxHp || (e.maxHp == best->maxHp && d < bestDistSq)) {
+                    best = &e;
+                    bestDistSq = d;
+                }
             }
+            if (best == nullptr) continue;
+            if (keep.kind == TargetKind::Enemy && keep.id != best->id) {
+                for (const Enemy& e : enemies_) {
+                    if (e.alive && e.id == keep.id && inTier(e) && e.maxHp == best->maxHp) {
+                        return TargetOf(e);  // 今狙っている相手も最も高ければ、狙い続ける
+                    }
+                }
+            }
+            return TargetOf(*best);
         }
     }
-    if (best.kind != TargetKind::None) {
-        return best;
+    // 敵本体がいなければ、敵の弾はどれもHP1なので、最も近いものを選ぶ
+    return FindNearestTarget(from);
+}
+
+Target World::FindPierceTarget(const Vec2& from, const std::vector<Target>& exclude) const {
+    // ビームの線の上に乗る数を数える（コアから aim へ向かう線。手前も背後も含め、コアより後ろは含めない）
+    const auto score = [this, &from](const Vec2& aim) {
+        const Vec2 dir = (aim - from).Normalized();
+        float total = 0.0f;
+        const auto onLine = [&from, &dir](const Vec2& p, float radius) {
+            const Vec2 rel = p - from;
+            const float along = rel.Dot(dir);
+            if (along < 0.0f) return false;
+            const float r = radius + Config::BeamHalfWidth;
+            return (rel - dir * along).LengthSq() <= r * r;
+        };
+        for (const Enemy& e : enemies_) {
+            if (e.alive && onLine(e.pos, e.radius)) total += 1.0f;
+        }
+        for (const Bullet& b : enemyBullets_) {
+            if (b.alive && onLine(b.pos, b.radius)) total += Config::BeamPierceBulletWeight;
+        }
+        return total;
+    };
+    // 中・重 → 軽 の順に、いる区分から選ぶ
+    for (int tier = 0; tier < 2; ++tier) {
+        for (int pass = 0; pass < 2; ++pass) {
+            const Enemy* best = nullptr;
+            float bestScore = 0.0f;
+            float bestDistSq = 0.0f;
+            for (const Enemy& e : enemies_) {
+                if (!e.alive || (e.cls == EnemyClass::Light) != (tier == 1)) continue;
+                if (pass == 0 && Contains(exclude, TargetOf(e))) continue;
+                const float s = score(e.pos);
+                const float d = (e.pos - from).LengthSq();
+                if (best == nullptr || s > bestScore || (s == bestScore && d < bestDistSq)) {
+                    best = &e;
+                    bestScore = s;
+                    bestDistSq = d;
+                }
+            }
+            if (best != nullptr) return TargetOf(*best);
+        }
     }
-    // 敵の弾はどれもHP1なので、最も近いものを選ぶ
+    // 敵本体がいなければ、最も近い敵の弾
     return FindNearestTarget(from);
 }
 

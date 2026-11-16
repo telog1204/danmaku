@@ -8,6 +8,13 @@ enum class TargetKind {
     EnemyBullet,
 };
 
+// 武装がロックオンするときの、狙う相手の優先の仕方
+enum class TargetPriority {
+    Any,             // 敵本体と敵の弾を区別しない（誘導兵器）
+    LightAndBullets, // 軽の敵と敵の弾だけ（速射砲）
+    MediumFirst,     // 中・重 → 軽 → 敵の弾 の順に、いる区分から選ぶ（ビーム砲）
+};
+
 // 武装や誘導弾が狙う相手（kind と id で相手を見分ける。pos と vel はそのときの位置と速さ）
 struct Target {
     TargetKind kind = TargetKind::None;
