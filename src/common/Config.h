@@ -40,6 +40,8 @@ namespace Config {
     constexpr float RapidRetargetDegrees = 45.0f;
     constexpr float RapidFastTurnDegrees = 720.0f; // そのときの旋回の速さ（度/秒）
     constexpr float RapidResumeDegrees = 10.0f;    // 角度の差がこれ以内になったら、撃つのを再開してふだんの旋回に戻る
+    // 狙っていた相手がいなくなったとき、今の向きからこの角度（片側）以内に狙える相手がいれば、旋回せずに済むその相手を優先する
+    constexpr float RapidKeepAimDegrees = 20.0f;
     constexpr float PlayerBulletRadius = 3.0f;
     constexpr float RapidBulletTailLength = 24.0f; // 弾の見た目の長さ（赤一色の短い線で描く。当たり判定は丸のまま）
     constexpr int RapidGunEnergy = 10;
@@ -60,7 +62,7 @@ namespace Config {
     constexpr float MissileTurnDegrees = 360.0f;  // 1秒間に曲がれる角度（度）
     constexpr float MissileStraightSeconds = 0.25f; // 撃ち出してからまっすぐ進む時間（近接防御型はまっすぐ進まない）。この間は爆発に巻き込まれない
     constexpr float MissileViewDegrees = 120.0f;  // 誘導弾が見える前方の範囲（度。左右に半分ずつ）。後ろ側は見えない
-    constexpr int MissileTargetCap = 3;           // 同じ種類の武装から出た誘導弾が、同じ相手を狙える数
+    constexpr int MissileTargetCap = 2;           // 同じ相手を追いかけられる誘導弾の数（撃った武装に関係なく、すべての誘導弾で数える）
     constexpr float MissileRadius = 4.0f;
     constexpr float MissileLifeSeconds = 4.0f;    // これより長く飛んだら消える
     constexpr float MissileExplosionRadius = 25.0f;
@@ -75,6 +77,7 @@ namespace Config {
     constexpr float ShellDirectDamage = 15.0f;    // 直撃した敵への威力
     constexpr float ShellShortDistance = 30.0f;   // 敵が多い場所の中心から、どれだけ手前で炸裂するか
     constexpr float CrowdRadius = 100.0f;         // 「敵が多い場所」を数えるときの範囲（半径）
+    constexpr float CrowdRefreshSeconds = 0.1f;   // 速射砲の攻撃型：「軽の敵と敵の弾が多い場所」を数え直す間隔（数が多く重いため）
     constexpr float ShellFlameRadius = 70.0f;
     constexpr float ShellFlameDamage = 6.0f;
     constexpr float ShellFlameSeconds = 0.4f;     // 爆炎がその場に残る時間
@@ -87,8 +90,9 @@ namespace Config {
     constexpr int ShellEnergy = 30;
 
     // 派生版（上の基本型との違い）
-    constexpr float RapidSweepDegrees = 30.0f;       // 速射砲 弾幕型・攻撃型：扇形に往復する幅（片側の角度）
-    constexpr float RapidSweepSpeedDegrees = 120.0f; // 往復する速さ（度/秒）
+    constexpr float RapidSweepDegrees = 15.0f;       // 速射砲 弾幕型・攻撃型：扇形に往復する幅（片側の角度）。端でゆっくりになる滑らかな往復
+    constexpr float RapidSweepPeriodMin = 0.8f;      // 1往復の時間（秒）。速射砲ごとにこの範囲でランダムに決め、全体で揃わないようにする
+    constexpr float RapidSweepPeriodMax = 1.2f;
     constexpr float RapidCloseInterval = 0.05f;      // 速射砲 近接防御型：撃つ間隔
     constexpr float RapidCloseRange = 300.0f;        // 速射砲 近接防御型：この距離に何か入ったら撃ち始め、いなくなったらやめる
     constexpr int RapidBarrageEnergy = 10;

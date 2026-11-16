@@ -114,6 +114,8 @@ void World::Reset() {
     fleetKills_ = 0;
     nextId_ = 1;
     elapsed_ = 0.0f;
+    lightCrowdTime_ = -1.0f;
+    lightCrowdFound_ = false;
     spawnTimer_ = 0.0f;
     gameOver_ = false;
     gameOverSeconds_ = 0.0f;
@@ -299,6 +301,7 @@ std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRang
             t.id = e.id;
             t.pos = e.pos;
             t.vel = e.vel;
+            t.light = (e.cls == EnemyClass::Light);
             if (!accept || accept(t)) {
                 found.emplace_back(d, t);
             }
@@ -338,12 +341,18 @@ namespace {
     }
 }
 
-Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude) {
-    std::vector<Target> candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates,
-                                                           [&exclude](const Target& t) { return !Contains(exclude, t); });
+Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude,
+                               bool lightAndBulletsOnly) {
+    // 速射砲は、軽の敵と敵の弾だけを狙う（中・重にはほとんど効かないため）
+    const auto allowed = [lightAndBulletsOnly](const Target& t) {
+        return !lightAndBulletsOnly || t.kind == TargetKind::EnemyBullet || t.light;
+    };
+    std::vector<Target> candidates = FindNearestCandidates(
+        from, maxRange, bodiesFirst, Config::LockOnCandidates,
+        [&exclude, &allowed](const Target& t) { return allowed(t) && !Contains(exclude, t); });
     if (candidates.empty()) {
         // 外すと候補がなくなるときは、ほかの武装と重なっても狙う
-        candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates);
+        candidates = FindNearestCandidates(from, maxRange, bodiesFirst, Config::LockOnCandidates, allowed);
     }
     if (candidates.empty()) {
         return Target();
@@ -351,10 +360,30 @@ Target World::PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirs
     return candidates[std::uniform_int_distribution<size_t>(0, candidates.size() - 1)(rng_)];
 }
 
+Target World::PickInAimCone(const Vec2& from, float maxRange, float facing, float coneRadians, const std::vector<Target>& exclude,
+                           bool lightAndBulletsOnly) const {
+    const std::vector<Target> inRange = FindNearestCandidates(
+        from, maxRange, false, static_cast<size_t>(-1), [&exclude, lightAndBulletsOnly](const Target& t) {
+            return (!lightAndBulletsOnly || t.kind == TargetKind::EnemyBullet || t.light) && !Contains(exclude, t);
+        });
+    Target best;
+    float bestDiff = coneRadians;
+    for (const Target& t : inRange) {
+        const Vec2 to = t.pos - from;
+        const float diff = std::fabs(WrapAngle(std::atan2(to.y, to.x) - facing));
+        if (diff <= bestDiff) {
+            best = t;
+            bestDiff = diff;
+        }
+    }
+    return best;
+}
+
 std::vector<Target> World::TargetsOfSameKind(const Weapon* self) const {
     std::vector<Target> targets;
     for (const auto& w : weapons_) {
-        if (w.get() == self || w->Kind() != self->Kind()) continue;
+        // 派生版が同じなら、連装の段階が違っても同じ種類として扱う
+        if (w.get() == self || w->Kind().variant != self->Kind().variant) continue;
         const Target t = w->CurrentTarget();
         if (t.kind != TargetKind::None) {
             targets.push_back(t);
@@ -436,6 +465,39 @@ bool World::FindCrowdCenter(Vec2& center) const {
         }
     }
     return bestCount > 0;
+}
+
+bool World::FindLightCrowdCenter(Vec2& center) {
+    if (lightCrowdTime_ < 0.0f || elapsed_ - lightCrowdTime_ >= Config::CrowdRefreshSeconds || elapsed_ < lightCrowdTime_) {
+        lightCrowdTime_ = elapsed_;
+        // 軽の敵と敵の弾の位置を集め、周り（CrowdRadius 以内）に最も多く集まっている所の平均の位置を中心とする
+        std::vector<Vec2> points;
+        for (const Enemy& e : enemies_) {
+            if (e.alive && e.cls == EnemyClass::Light) points.push_back(e.pos);
+        }
+        for (const Bullet& b : enemyBullets_) {
+            if (b.alive) points.push_back(b.pos);
+        }
+        const float r2 = Config::CrowdRadius * Config::CrowdRadius;
+        int bestCount = 0;
+        for (const Vec2& p : points) {
+            int count = 0;
+            Vec2 sum;
+            for (const Vec2& o : points) {
+                if ((o - p).LengthSq() <= r2) {
+                    ++count;
+                    sum += o;
+                }
+            }
+            if (count > bestCount) {
+                bestCount = count;
+                lightCrowdCenter_ = sum * (1.0f / count);
+            }
+        }
+        lightCrowdFound_ = bestCount > 0;
+    }
+    center = lightCrowdCenter_;
+    return lightCrowdFound_;
 }
 
 void World::FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, float damage) {
@@ -877,32 +939,35 @@ bool World::MissileCanSee(const Missile& m, const Vec2& pos) const {
 }
 
 Target World::AcquireMissileTarget(const Missile& m) {
-    // 前方に見えている相手を近い順に並べる（攻撃型は敵本体を優先）
+    // 撃った武装に関係なく、すべての誘導弾で同じ選び方をする。
+    // 前方に見えている相手（敵本体と敵の弾を区別しない）を近い順に並べ、近い順3体のうち、
+    // まだ上限の数の誘導弾に追いかけられていない相手からランダムに選ぶ。
+    // 3体ともふさがっていれば、近い順に1体ずつ探す範囲を広げる。見つからなければ選ばない（まっすぐ進み、あとで探し直す）
     const std::vector<Target> visible = FindNearestCandidates(
-        m.pos, 1.0e9f, m.bodiesFirst, static_cast<size_t>(-1), [this, &m](const Target& t) { return MissileCanSee(m, t.pos); });
-    if (visible.empty()) {
-        return Target();
-    }
-    // 同じ種類の武装から出た誘導弾が、すでに上限の数だけ追いかけている相手は外す（外すと候補がなくなるときは外さない）
-    std::vector<Target> open;
-    for (const Target& t : visible) {
+        m.pos, 1.0e9f, false, static_cast<size_t>(-1), [this, &m](const Target& t) { return MissileCanSee(m, t.pos); });
+    const auto isOpen = [this, &m](const Target& t) {
         int chasing = 0;
         for (const Missile& o : missiles_) {
-            if (&o != &m && o.alive && o.kind == m.kind && o.targetKind == t.kind && o.targetId == t.id) {
+            if (&o != &m && o.alive && o.targetKind == t.kind && o.targetId == t.id) {
                 ++chasing;
             }
         }
-        if (chasing < Config::MissileTargetCap) {
-            open.push_back(t);
+        return chasing < Config::MissileTargetCap;
+    };
+    std::vector<Target> open;
+    for (size_t i = 0; i < visible.size(); ++i) {
+        if (isOpen(visible[i])) {
+            open.push_back(visible[i]);
+        }
+        // 近い順3体まで見て、空いている相手が1体でもいれば、その中から選ぶ。いなければ範囲を1体ずつ広げる
+        if (i + 1 >= Config::LockOnCandidates && !open.empty()) {
+            break;
         }
     }
-    const std::vector<Target>& pool = open.empty() ? visible : open;
-    if (m.bodiesFirst) {
-        return pool.front();  // 攻撃型：最も近いもの
+    if (open.empty()) {
+        return Target();
     }
-    // 基本型・近接防御型：近い順に3番目までの中からランダムに選ぶ
-    const size_t n = std::min(pool.size(), Config::LockOnCandidates);
-    return pool[std::uniform_int_distribution<size_t>(0, n - 1)(rng_)];
+    return open[std::uniform_int_distribution<size_t>(0, open.size() - 1)(rng_)];
 }
 
 void World::AgeMessages(float dt) {

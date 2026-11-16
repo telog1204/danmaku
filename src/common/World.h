@@ -44,14 +44,13 @@ struct Beam {
 };
 
 // 誘導弾。撃ち出してまっすぐ進んだあと（近接防御型はすぐに）、前方に見えている相手を自分で選んで追いかける。
+// 相手の選び方は、撃った武装に関係なくすべて同じ（World::AcquireMissileTarget）。
 // 後ろ側は見えないので、相手を追い越すと見失い、前方の相手を選び直す
 struct Missile {
-    WeaponKind kind;            // 撃った武装の種類（同じ種類の誘導弾が同じ相手を狙いすぎないように数えるため）
     Vec2 pos;
     float heading = 0.0f;
     float age = 0.0f;
     float straightSeconds = 0.0f; // 撃ち出してからまっすぐ進む時間（この間は相手を選ばない）
-    bool bodiesFirst = false;   // 敵本体を優先し、最も近いものを選ぶ（攻撃型）。そうでなければ近い順3つからランダム
     TargetKind targetKind = TargetKind::None;
     int targetId = 0;
     float damage = 0.0f;
@@ -221,13 +220,22 @@ public:
                                               const std::function<bool(const Target&)>& accept = nullptr) const;
     // 近い順に3番目までの中から、ランダムに1つ選ぶ（ロックオンする相手を決める）。
     // exclude にある相手は候補から外す（外すと候補がなくなるときは、外さずに選ぶ）
-    Target PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude = {});
-    // self と同じ種類（派生版と連装の段階が同じ）のほかの武装が、今狙っている相手
+    // lightAndBulletsOnly なら、軽の敵と敵の弾だけを候補にする（速射砲）
+    Target PickLockOnTarget(const Vec2& from, float maxRange, bool bodiesFirst, const std::vector<Target>& exclude = {},
+                            bool lightAndBulletsOnly = false);
+    // 狙っていた相手がいなくなったときに使う：facing の向きから coneRadians（片側）以内にいる相手のうち、
+    // 角度の差が最も小さいものを選ぶ（旋回せずに狙える相手）。exclude にある相手は除く。いなければ kind が None
+    Target PickInAimCone(const Vec2& from, float maxRange, float facing, float coneRadians, const std::vector<Target>& exclude,
+                         bool lightAndBulletsOnly) const;
+    // self と同じ種類（派生版が同じ。連装の段階は区別しない）のほかの武装が、今狙っている相手
     std::vector<Target> TargetsOfSameKind(const Weapon* self) const;
     // 番号で相手を探す（もういなければ kind が None になる）
     Target FindTargetById(TargetKind kind, int id) const;
     // 敵が多い場所の中心（敵本体がいなければ false）
     bool FindCrowdCenter(Vec2& center) const;
+    // 軽の敵と敵の弾が多い場所の中心（どちらもいなければ false）。速射砲の攻撃型が使う。
+    // 敵の弾は数が多く重くなるので、ゲームの時間で CrowdRefreshSeconds ごとに数え直し、その間は前の結果を使う
+    bool FindLightCrowdCenter(Vec2& center);
 
     void AddPlayerBullet(const Bullet& b) { playerBullets_.push_back(b); }
     void FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, float damage);
@@ -284,6 +292,10 @@ private:
     std::mt19937 rng_;
     int nextId_ = 1;
     float elapsed_ = 0.0f;
+    // FindLightCrowdCenter の前の結果（数え直した時刻。負ならまだ数えていない）
+    float lightCrowdTime_ = -1.0f;
+    bool lightCrowdFound_ = false;
+    Vec2 lightCrowdCenter_;
     float spawnTimer_ = 0.0f;
     float grandFleetTimer_ = 0.0f;  // 次の大艦隊が現れるまでの時間（大艦隊がいない間だけ減る）
     std::vector<Enemy> pendingEnemies_;  // 敵の動きの途中で生み出された敵（動きの処理が終わってから加える）

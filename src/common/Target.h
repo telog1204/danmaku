@@ -14,6 +14,7 @@ struct Target {
     int id = 0;
     Vec2 pos;
     Vec2 vel;
+    bool light = false;  // 軽の敵か（速射砲は、軽の敵と敵の弾だけを狙う）
 
     bool SameAs(const Target& o) const { return kind != TargetKind::None && kind == o.kind && id == o.id; }
 };

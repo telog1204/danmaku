@@ -129,7 +129,7 @@ namespace {
     }
 }
 
-void BuildScreen::Open() {
+void BuildScreen::Open(const World& world) {
     // 開いたときの指（「組み込み」ボタンを押した指）は、離すまで操作として扱わない
     pressing_ = true;
     dragging_ = true;
@@ -138,6 +138,9 @@ void BuildScreen::Open() {
     deniedArea_ = -1;
     deniedRow_ = -1;
     deniedTimer_ = 0.0f;
+    for (int c = 0; c < 2; ++c) {
+        scroll_[c] = std::max(0.0f, std::min(scroll_[c], MaxScroll(c, world)));
+    }
 }
 
 float BuildScreen::MaxScroll(int column, const World& world) const {
