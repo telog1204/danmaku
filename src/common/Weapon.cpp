@@ -279,7 +279,9 @@ namespace {
             mountIndex_ = (mountIndex_ + 1) % mounts;
             const Vec2 dir = Vec2::FromAngle(facing + world.RandomRange(-spread, spread));
             Bullet b;
-            b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(mount, mounts, Config::RapidBarrelSpacing);
+            // 撃った砲の砲身の先から出る（画面に描く砲身と同じ長さ・並び）
+            b.pos = origin + Vec2::FromAngle(facing) * Config::RapidBarrelLength +
+                    side * BarrelOffset(mount, mounts, Config::RapidBarrelSpacing);
             b.vel = dir * Config::RapidGunBulletSpeed;
             b.radius = Config::PlayerBulletRadius;
             b.damage = Config::RapidGunDamage * PowerScale(Config::PartPowerRate);
@@ -410,7 +412,8 @@ namespace {
             const Vec2 side = dir.Perpendicular();
             const float scale = (Kind().variant == WeaponVariant::BeamDecisive) ? Config::BeamDecisiveDamageScale : 1.0f;
             Beam b;
-            b.pos = origin + dir * Config::CoreRadius + side * BarrelOffset(shot, Barrels(), Config::BeamBarrelSpacing);
+            // 撃った砲の砲身の先から出る（画面に描く砲身と同じ長さ・並び）
+            b.pos = origin + dir * Config::BeamBarrelLength + side * BarrelOffset(shot, Barrels(), Config::BeamBarrelSpacing);
             b.vel = dir * Config::BeamSpeed;
             b.damage = Config::BeamDamage * scale * PowerScale(Config::PartPowerRate);
             b.decay = std::min(Config::BeamDecayMax,
