@@ -56,16 +56,26 @@ namespace {
     class LockOn {
     public:
         // 今ロックオンしている相手を返す。外れていたら選び直す（狙うものがいなければ kind が None）
-        // lightAndBulletsOnly なら、軽の敵と敵の弾だけから選ぶ（速射砲）
+        // lightAndBulletsOnly なら、軽の敵と敵の弾だけから選ぶ（速射砲）。
+        // keepAimFacing を渡したとき（速射砲）は、狙っていた相手がいなくなったら、まずその向きから
+        // RapidKeepAimDegrees 以内にいる相手（旋回せずに狙える相手）を選ぶ。いなければ近い順3つから選ぶ
         Target Get(World& world, const Weapon* self, const Vec2& from, float maxRange, bool bodiesFirst,
-                   bool lightAndBulletsOnly = false) {
-            if (kind_ != TargetKind::None) {
+                   bool lightAndBulletsOnly = false, const float* keepAimFacing = nullptr) {
+            const bool hadTarget = (kind_ != TargetKind::None);
+            if (hadTarget) {
                 const Target t = world.FindTargetById(kind_, id_);
                 if (t.kind != TargetKind::None && (t.pos - from).LengthSq() <= maxRange * maxRange) {
                     return t;
                 }
             }
-            const Target t = world.PickLockOnTarget(from, maxRange, bodiesFirst, world.TargetsOfSameKind(self), lightAndBulletsOnly);
+            Target t;
+            if (hadTarget && keepAimFacing != nullptr) {
+                t = world.PickInAimCone(from, maxRange, *keepAimFacing, DegreesToRadians(Config::RapidKeepAimDegrees),
+                                        world.TargetsOfSameKind(self), lightAndBulletsOnly);
+            }
+            if (t.kind == TargetKind::None) {
+                t = world.PickLockOnTarget(from, maxRange, bodiesFirst, world.TargetsOfSameKind(self), lightAndBulletsOnly);
+            }
             kind_ = t.kind;
             id_ = t.id;
             return t;
@@ -269,7 +279,7 @@ namespace {
                 if (Kind().variant == WeaponVariant::RapidAttack) {
                     if (!world.FindLightCrowdCenter(center)) return false;
                 } else {
-                    const Target target = lock_.Get(world, this, origin, NoRange, false, true);
+                    const Target target = lock_.Get(world, this, origin, NoRange, false, true, &facing_);
                     if (target.kind == TargetKind::None) return false;
                     center = target.pos;
                     tracked = target;
@@ -279,7 +289,7 @@ namespace {
             }
             case WeaponVariant::RapidClose: {
                 // 近接防御型：軽の敵と敵の弾だけを、射程内の近い順3つからロックオンし、先読みで狙う
-                const Target target = lock_.Get(world, this, origin, Config::RapidCloseRange, false, true);
+                const Target target = lock_.Get(world, this, origin, Config::RapidCloseRange, false, true, &facing_);
                 if (target.kind == TargetKind::None) return false;
                 tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
@@ -287,7 +297,7 @@ namespace {
             }
             default: {
                 // 基本型：軽の敵と敵の弾だけを、近い順3つからロックオンし、先読みで狙う
-                const Target target = lock_.Get(world, this, origin, NoRange, false, true);
+                const Target target = lock_.Get(world, this, origin, NoRange, false, true, &facing_);
                 if (target.kind == TargetKind::None) return false;
                 tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
@@ -434,11 +444,9 @@ namespace {
             {
                 // 撃ち出す向きだけを決める。狙う相手は、誘導弾がまっすぐ進み終えたあと（近接防御型はすぐに）自分で選ぶ
                 Missile m;
-                m.kind = Kind();
                 m.heading = baseHeading;
                 m.pos = origin + Vec2::FromAngle(m.heading) * Config::CoreRadius;
                 m.straightSeconds = (Kind().variant == WeaponVariant::MissileClose) ? 0.0f : Config::MissileStraightSeconds;
-                m.bodiesFirst = (Kind().variant == WeaponVariant::MissileAttack);
                 m.damage = Config::MissileDamage * PowerScale(Config::PartPowerRate);
                 m.turnDegrees = Config::MissileTurnDegrees *
                                 (1.0f + Config::MissileHomingRate * static_cast<float>(CountPart(PartKind::Homing)));

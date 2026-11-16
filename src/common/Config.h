@@ -40,6 +40,8 @@ namespace Config {
     constexpr float RapidRetargetDegrees = 45.0f;
     constexpr float RapidFastTurnDegrees = 720.0f; // そのときの旋回の速さ（度/秒）
     constexpr float RapidResumeDegrees = 10.0f;    // 角度の差がこれ以内になったら、撃つのを再開してふだんの旋回に戻る
+    // 狙っていた相手がいなくなったとき、今の向きからこの角度（片側）以内に狙える相手がいれば、旋回せずに済むその相手を優先する
+    constexpr float RapidKeepAimDegrees = 20.0f;
     constexpr float PlayerBulletRadius = 3.0f;
     constexpr float RapidBulletTailLength = 24.0f; // 弾の見た目の長さ（赤一色の短い線で描く。当たり判定は丸のまま）
     constexpr int RapidGunEnergy = 10;
@@ -60,7 +62,7 @@ namespace Config {
     constexpr float MissileTurnDegrees = 360.0f;  // 1秒間に曲がれる角度（度）
     constexpr float MissileStraightSeconds = 0.25f; // 撃ち出してからまっすぐ進む時間（近接防御型はまっすぐ進まない）。この間は爆発に巻き込まれない
     constexpr float MissileViewDegrees = 120.0f;  // 誘導弾が見える前方の範囲（度。左右に半分ずつ）。後ろ側は見えない
-    constexpr int MissileTargetCap = 3;           // 同じ種類の武装から出た誘導弾が、同じ相手を狙える数
+    constexpr int MissileTargetCap = 2;           // 同じ相手を追いかけられる誘導弾の数（撃った武装に関係なく、すべての誘導弾で数える）
     constexpr float MissileRadius = 4.0f;
     constexpr float MissileLifeSeconds = 4.0f;    // これより長く飛んだら消える
     constexpr float MissileExplosionRadius = 25.0f;
