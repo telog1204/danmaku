@@ -144,6 +144,8 @@ namespace {
             return 1.0f + ratePerPart * static_cast<float>(CountPart(PartKind::Power));
         }
         int Barrels() const { return Kind().barrels; }
+        // 一斉射の途中か（1門目を撃ってから、全門を撃ち切るまで）
+        bool InVolley() const { return pendingShots_ > 0; }
 
     private:
         float interval_;
@@ -384,6 +386,9 @@ namespace {
                 break;
             }
             target_ = target;
+            if (InVolley()) {
+                return;  // 連装の一斉射は、撃ち切るまで砲を回さない（全門が砲身の向きのとおりに出るように）
+            }
             const bool hasTarget = (target.kind != TargetKind::None);
             const float desired =
                 hasTarget ? AngleOf(LeadTarget(origin, target.pos, target.vel, Config::BeamSpeed) - origin) : turret_.Facing();
