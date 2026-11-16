@@ -17,7 +17,7 @@ namespace CrashState {
         MoveShells,   // 炸裂弾の移動
         Explosions,   // 爆発の時間経過
         Collisions,   // 当たり判定
-        Pickups,      // 落とし物
+        Messages,     // 知らせ
         Cleanup,      // 消えたものの取り除き
         Draw,         // 描画
     };
@@ -25,7 +25,7 @@ namespace CrashState {
     void SetPhase(Phase phase);
     void SetElapsed(float seconds);
     void SetCounts(int enemies, int enemyBullets, int playerBullets, int missiles, int beams, int shells,
-                   int explosions, int pickups);
+                   int explosions);
 
     // 覚えている状況を、異常終了の種類（signalName）と合わせて文章にして buffer へ書く。書いた長さを返す。
     // 異常終了の瞬間に呼ぶので、メモリの確保や snprintf などを使わずに書く

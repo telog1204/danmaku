@@ -5,7 +5,7 @@ namespace {
     // 異常終了の瞬間にも読めるよう、決まった場所に置く
     volatile int g_phase = 0;
     volatile int g_elapsedTenths = 0;
-    volatile int g_counts[8] = {};
+    volatile int g_counts[7] = {};
 
     const char* PhaseName(int phase) {
         switch (static_cast<CrashState::Phase>(phase)) {
@@ -19,7 +19,7 @@ namespace {
         case CrashState::Phase::MoveShells: return "炸裂弾の移動";
         case CrashState::Phase::Explosions: return "爆発";
         case CrashState::Phase::Collisions: return "当たり判定";
-        case CrashState::Phase::Pickups: return "落とし物";
+        case CrashState::Phase::Messages: return "知らせ";
         case CrashState::Phase::Cleanup: return "消えたものの取り除き";
         case CrashState::Phase::Draw: return "描画";
         }
@@ -59,7 +59,7 @@ void CrashState::SetElapsed(float seconds) {
 }
 
 void CrashState::SetCounts(int enemies, int enemyBullets, int playerBullets, int missiles, int beams, int shells,
-                           int explosions, int pickups) {
+                           int explosions) {
     g_counts[0] = enemies;
     g_counts[1] = enemyBullets;
     g_counts[2] = playerBullets;
@@ -67,7 +67,6 @@ void CrashState::SetCounts(int enemies, int enemyBullets, int playerBullets, int
     g_counts[4] = beams;
     g_counts[5] = shells;
     g_counts[6] = explosions;
-    g_counts[7] = pickups;
 }
 
 size_t CrashState::FormatReport(char* buffer, size_t capacity, const char* signalName) {
@@ -94,8 +93,6 @@ size_t CrashState::FormatReport(char* buffer, size_t capacity, const char* signa
     w.Number(g_counts[5]);
     w.Text("／爆発 ");
     w.Number(g_counts[6]);
-    w.Text("／落とし物 ");
-    w.Number(g_counts[7]);
     w.Text("\n");
     if (capacity > 0) {
         buffer[w.length] = '\0';

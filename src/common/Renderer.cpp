@@ -159,6 +159,14 @@ namespace {
         }
     }
 
+    // 速射砲の弾：ビームを短くしたような赤い筋（進む向きの後ろへ尾を伸ばす。当たり判定は丸のまま）
+    void DrawRapidBullet(const Bullet& b) {
+        const Vec2 tail = b.pos - b.vel.Normalized() * Config::RapidBulletTailLength;
+        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(80, 15, 10), Sz(5.0f));
+        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(255, 60, 40), Sz(2.0f));
+        DrawCircle(Px(b.pos.x), Px(b.pos.y), Sz(2.0f), GetColor(255, 200, 180), TRUE);
+    }
+
     void DrawBeam(const Beam& b) {
         const Vec2 tail = b.Tail();
         DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(30, 60, 90), Sz(7.0f));
@@ -176,43 +184,6 @@ namespace {
         const Vec2 flame = m.pos - f * 9.0f;
         DrawCircle(Px(flame.x), Px(flame.y), Sz(3.0f), GetColor(90, 50, 10), TRUE);
         DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 230, 90), TRUE);
-    }
-
-    // 系統の色（落とし物に使う）
-    void FamilyColor(WeaponFamily family, int& r, int& g, int& b) {
-        switch (family) {
-        case WeaponFamily::RapidGun: r = 80; g = 220; b = 230; return;
-        case WeaponFamily::Beam: r = 90; g = 140; b = 255; return;
-        case WeaponFamily::Missile: r = 230; g = 210; b = 60; return;
-        case WeaponFamily::Shell: r = 255; g = 140; b = 40; return;
-        }
-        r = g = b = 255;
-    }
-
-    void DrawPickup(const Pickup& p) {
-        const int x = Px(p.pos.x);
-        const int y = Px(p.pos.y);
-        int r = 255, g = 215, b = 106;
-        switch (p.kind) {
-        case PickupKind::Energy:
-            // 黄色のひし形
-            DrawCircle(x, y, Sz(14.0f), GetColor(60, 50, 20), TRUE);
-            DrawTriangle(x, y - Sz(9.0f), x - Sz(9.0f), y, x + Sz(9.0f), y, GetColor(255, 215, 106), TRUE);
-            DrawTriangle(x, y + Sz(9.0f), x - Sz(9.0f), y, x + Sz(9.0f), y, GetColor(255, 215, 106), TRUE);
-            break;
-        case PickupKind::Weapon:
-            // 白い四角（ふちは系統の色）
-            FamilyColor(p.family, r, g, b);
-            DrawCircle(x, y, Sz(14.0f), GetColor(r / 5, g / 5, b / 5), TRUE);
-            DrawBox(x - Sz(8.0f), y - Sz(8.0f), x + Sz(8.0f) + 1, y + Sz(8.0f) + 1, GetColor(r, g, b), TRUE);
-            DrawBox(x - Sz(5.0f), y - Sz(5.0f), x + Sz(5.0f) + 1, y + Sz(5.0f) + 1, GetColor(255, 255, 255), TRUE);
-            break;
-        case PickupKind::Part:
-            // 小さな丸（系統の色）
-            FamilyColor(p.family, r, g, b);
-            DrawGlowCircle(p.pos, 6.0f, r, g, b);
-            break;
-        }
     }
 
     void DrawExplosion(const Explosion& x) {
@@ -239,7 +210,7 @@ void DrawWorld(const World& world) {
         if (b.life >= 0.0f) {
             DrawGlowCircle(b.pos, b.radius, 255, 170, 60);  // 炸裂弾の破片
         } else {
-            DrawGlowCircle(b.pos, b.radius, 120, 255, 230);
+            DrawRapidBullet(b);
         }
     }
     for (const Beam& b : world.Beams()) {
@@ -250,9 +221,6 @@ void DrawWorld(const World& world) {
     }
     for (const Shell& s : world.Shells()) {
         DrawGlowCircle(s.pos, Config::ShellRadius, 255, 140, 40);
-    }
-    for (const Pickup& p : world.Pickups()) {
-        DrawPickup(p);
     }
     for (const Bullet& b : world.EnemyBullets()) {
         if (b.homing) {

@@ -106,7 +106,6 @@ void World::Reset() {
     shells_.clear();
     explosions_.clear();
     pendingExplosions_.clear();
-    pickups_.clear();
     messages_.clear();
     rewardChoices_.clear();
     pendingEnemies_.clear();
@@ -511,15 +510,14 @@ void World::Step(float dt) {
     AgeExplosions(dt);
     CrashState::SetPhase(CrashState::Phase::Collisions);
     HandleCollisions();
-    CrashState::SetPhase(CrashState::Phase::Pickups);
-    MovePickups(dt);
+    CrashState::SetPhase(CrashState::Phase::Messages);
     AgeMessages(dt);
     CrashState::SetPhase(CrashState::Phase::Cleanup);
     RemoveDead();
     CrashState::SetCounts(static_cast<int>(enemies_.size()), static_cast<int>(enemyBullets_.size()),
                           static_cast<int>(playerBullets_.size()), static_cast<int>(missiles_.size()),
                           static_cast<int>(beams_.size()), static_cast<int>(shells_.size()),
-                          static_cast<int>(explosions_.size()), static_cast<int>(pickups_.size()));
+                          static_cast<int>(explosions_.size()));
 
     if (core_.hp <= 0) {
         core_.hp = 0;
@@ -907,26 +905,6 @@ Target World::AcquireMissileTarget(const Missile& m) {
     return pool[std::uniform_int_distribution<size_t>(0, n - 1)(rng_)];
 }
 
-void World::MovePickups(float dt) {
-    for (Pickup& p : pickups_) {
-        p.age += dt;
-        if (p.age < Config::PickupWaitSeconds) {
-            continue;  // 落ちた場所に少しとどまる
-        }
-        // コアへ吸い寄せられ、だんだん速くなる
-        p.speed = std::min(Config::PickupMaxSpeed, p.speed + Config::PickupAcceleration * dt);
-        const Vec2 toCore = core_.pos - p.pos;
-        const float dist = toCore.Length();
-        const float step = p.speed * dt;
-        if (dist <= core_.radius + Config::PickupRadius || dist <= step) {
-            p.alive = false;
-            Collect(p);
-        } else {
-            p.pos += toCore * (step / dist);
-        }
-    }
-}
-
 void World::AgeMessages(float dt) {
     for (Message& m : messages_) {
         m.life -= dt;
@@ -936,7 +914,8 @@ void World::AgeMessages(float dt) {
 }
 
 void World::DropItems(const Enemy& e) {
-    // 見えない経験値がたまったら、エネルギー上限解放パーツを落とす
+    // 倒した瞬間に手に入る（落とし物を弾と見間違えないように、フィールドには出さない）
+    // 見えない経験値がたまったら、エネルギー上限解放パーツが手に入る
     switch (e.cls) {
     case EnemyClass::Light: exp_ += Config::LightExp; break;
     case EnemyClass::Medium: exp_ += Config::MediumExp; break;
@@ -947,12 +926,10 @@ void World::DropItems(const Enemy& e) {
         expNeed_ += Config::ExpNeedGrowth;
         Pickup p;
         p.kind = PickupKind::Energy;
-        p.pos = e.pos + Vec2(RandomRange(-8.0f, 8.0f), RandomRange(-8.0f, 8.0f));
-        p.speed = Config::PickupStartSpeed;
-        pickups_.push_back(p);
+        Collect(p);
     }
 
-    // 一定の確率で、武装か強化パーツを落とす。武装をランダムに1つ選び、持っていなければその武装、持っていれば強化パーツにする
+    // 一定の確率で、武装か強化パーツが手に入る。武装をランダムに1つ選び、持っていなければその武装、持っていれば強化パーツにする
     if (RandomRange(0.0f, 1.0f) >= Config::DropChance) {
         return;
     }
@@ -967,9 +944,7 @@ void World::DropItems(const Enemy& e) {
         const auto& parts = FamilyParts(p.family);
         p.part = parts[std::uniform_int_distribution<size_t>(0, parts.size() - 1)(rng_)];
     }
-    p.pos = e.pos + Vec2(RandomRange(-8.0f, 8.0f), RandomRange(-8.0f, 8.0f));
-    p.speed = Config::PickupStartSpeed;
-    pickups_.push_back(p);
+    Collect(p);
 }
 
 void World::SortOwnedWeapons() {
@@ -1220,5 +1195,4 @@ void World::RemoveDead() {
     EraseDead(missiles_);
     EraseDead(shells_);
     EraseDead(explosions_);
-    EraseDead(pickups_);
 }

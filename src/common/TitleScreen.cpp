@@ -37,8 +37,8 @@ int LargeFont() {
 }
 
 TitleScreen::TitleScreen() {
-    // 背景に流す光る弾（色は、自分の弾・敵の弾・落とし物の色から）
-    static const int colors[][3] = { { 255, 90, 160 }, { 120, 255, 230 }, { 255, 215, 106 }, { 199, 155, 255 } };
+    // 背景に流す光る弾（色は、敵の弾・速射砲の弾・手に入れたものの知らせの色から）
+    static const int colors[][3] = { { 255, 90, 160 }, { 255, 60, 40 }, { 255, 215, 106 }, { 199, 155, 255 } };
     std::mt19937 rng(12345);
     std::uniform_real_distribution<float> x(0.0f, static_cast<float>(Config::ScreenWidth));
     std::uniform_real_distribution<float> y(0.0f, static_cast<float>(Config::ScreenHeight));
