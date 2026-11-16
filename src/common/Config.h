@@ -41,6 +41,7 @@ namespace Config {
     constexpr float RapidFastTurnDegrees = 720.0f; // そのときの旋回の速さ（度/秒）
     constexpr float RapidResumeDegrees = 10.0f;    // 角度の差がこれ以内になったら、撃つのを再開してふだんの旋回に戻る
     constexpr float PlayerBulletRadius = 3.0f;
+    constexpr float RapidBulletTailLength = 24.0f; // 弾の見た目の長さ（赤一色の短い線で描く。当たり判定は丸のまま）
     constexpr int RapidGunEnergy = 10;
 
     // ビーム砲（基本型）。敵を貫き、貫くたびに威力が下がる。長い尾を含めた線全体に当たり判定がある
@@ -136,16 +137,11 @@ namespace Config {
     constexpr float ShellFlameDurationRate = 0.5f; // 爆炎持続延長：爆炎の残る時間が増える割合
     constexpr int ShellFragmentsPerPart = 5;       // 破片増加：増える破片の数
 
-    // 落とし物
-    constexpr float DropChance = 0.1f;             // 敵を倒したときに、武装か強化パーツを落とす確率
-    constexpr int ExpFirstNeed = 10;               // 最初のエネルギー上限解放パーツが出るまでに必要な経験値
-    constexpr int ExpNeedGrowth = 5;               // 1つ出るたびに、次に必要な経験値が増える量
-    constexpr float PickupWaitSeconds = 0.3f;      // 落ちた場所にとどまる時間
-    constexpr float PickupStartSpeed = 400.0f;     // コアへ吸い寄せられ始める速さ
-    constexpr float PickupAcceleration = 1200.0f;
-    constexpr float PickupMaxSpeed = 1400.0f;
-    constexpr float PickupRadius = 8.0f;
-    constexpr float MessageSeconds = 2.0f;         // 拾ったものを画面の上に表示する時間
+    // 手に入るもの（敵を倒した瞬間に手に入る）
+    constexpr float DropChance = 0.1f;             // 敵を倒したときに、武装か強化パーツが手に入る確率
+    constexpr int ExpFirstNeed = 10;               // 最初のエネルギー上限解放パーツが手に入るまでに必要な経験値
+    constexpr int ExpNeedGrowth = 5;               // 1つ手に入るたびに、次に必要な経験値が増える量
+    constexpr float MessageSeconds = 2.0f;         // 手に入れたものを画面の上に表示する時間
 
     // 敵の出現。間隔は時間とともに短くなる（最初の間隔 − 経過秒 × 短くなる速さ。下限あり）
     constexpr float SpawnIntervalStart = 1.5f;

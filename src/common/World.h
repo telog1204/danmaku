@@ -72,7 +72,7 @@ struct Shell {
     bool alive = true;
 };
 
-// 倒した敵が落とすもの。落ちた場所に少しとどまってから、コアへ吸い寄せられて自動で拾われる
+// 手に入るもの。敵を倒した瞬間（と大艦隊の報酬）に手に入る
 enum class PickupKind {
     Energy,  // エネルギー上限解放パーツ
     Weapon,  // 武装
@@ -84,10 +84,6 @@ struct Pickup {
     WeaponKind weapon;                             // 武装のとき
     WeaponFamily family = WeaponFamily::RapidGun;  // 武装・強化パーツの系統
     PartKind part = PartKind::Power;               // 強化パーツのとき
-    Vec2 pos;
-    float age = 0.0f;
-    float speed = 0.0f;
-    bool alive = true;
 };
 
 // 拾ったものを画面の上に出す知らせ
@@ -175,7 +171,6 @@ public:
     const std::vector<Shell>& Shells() const { return shells_; }
     const std::vector<Explosion>& Explosions() const { return explosions_; }
     const std::vector<std::unique_ptr<Weapon>>& Weapons() const { return weapons_; }
-    const std::vector<Pickup>& Pickups() const { return pickups_; }
     const std::vector<Message>& Messages() const { return messages_; }
 
     // 組み込み画面から使うもの
@@ -248,7 +243,6 @@ private:
     void MoveMissiles(float dt);
     void MoveShells(float dt);
     void AgeExplosions(float dt);
-    void MovePickups(float dt);
     Target AcquireMissileTarget(const Missile& m);  // 誘導弾が、前方に見えている相手から狙う相手を選ぶ
     bool MissileCanSee(const Missile& m, const Vec2& pos) const;
     void AgeMessages(float dt);
@@ -286,7 +280,6 @@ private:
     std::vector<Shell> shells_;
     std::vector<Explosion> explosions_;
     std::vector<Explosion> pendingExplosions_;  // 当たり判定の途中で起きた爆発（判定が終わってから加える）
-    std::vector<Pickup> pickups_;
     std::vector<Message> messages_;
     std::mt19937 rng_;
     int nextId_ = 1;
