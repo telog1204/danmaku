@@ -22,12 +22,12 @@ namespace {
         return (p - (a + ab * t)).LengthSq();
     }
 
-    // 画面の外へこれだけ出た弾は消す
+    // フィールドの外へこれだけ出た弾は消す
     constexpr float CullMargin = 40.0f;
 
     bool IsFarOutside(const Vec2& p) {
         return p.x < -CullMargin || p.y < -CullMargin ||
-               p.x > Config::ScreenWidth + CullMargin || p.y > Config::ScreenHeight + CullMargin;
+               p.x > Config::FieldWidth + CullMargin || p.y > Config::FieldHeight + CullMargin;
     }
 
     bool Contains(const std::vector<int>& ids, int id) {
@@ -70,7 +70,7 @@ World::World() : rng_(static_cast<unsigned int>(GetNowHiPerformanceCount())) {
 }
 
 void World::Reset() {
-    core_.pos = Vec2(Config::ScreenWidth * 0.5f, Config::ScreenHeight * 0.5f);
+    core_.pos = Vec2(Config::FieldWidth * 0.5f, Config::FieldHeight * 0.5f);
     core_.radius = Config::CoreRadius;
     core_.maxHp = Config::CoreMaxHp;
     core_.hp = core_.maxHp;
@@ -566,9 +566,9 @@ void World::SpawnEnemy() {
 }
 
 Vec2 World::RandomEdgePoint(Vec2& outward) {
-    // 画面の四辺のどこかの、少し外側の点（outward は画面の外へ向かう向き）
-    const float w = static_cast<float>(Config::ScreenWidth);
-    const float h = static_cast<float>(Config::ScreenHeight);
+    // フィールドの四辺のどこかの、少し外側の点（outward はフィールドの外へ向かう向き）
+    const float w = static_cast<float>(Config::FieldWidth);
+    const float h = static_cast<float>(Config::FieldHeight);
     const float m = Config::SpawnMargin;
     const float t = RandomRange(0.0f, 2.0f * (w + h));
     if (t < w) {
@@ -812,7 +812,7 @@ void World::MoveBeams(float dt) {
         const Vec2 step = b.vel * dt;
         b.pos += step;
         b.traveled += step.Length();
-        // 尾まで画面の外へ出たら消す
+        // 尾までフィールドの外へ出たら消す
         if (IsFarOutside(b.Tail())) {
             b.alive = false;
         }
@@ -1183,7 +1183,8 @@ void World::HandleCollisions() {
                 }
             }
             for (Missile& m : missiles_) {
-                if (m.alive && Overlaps(x.pos, x.radius, m.pos, Config::MissileRadius)) {
+                // まっすぐ進んでいるあいだ（撃ち出した直後）は巻き込まれない
+                if (m.alive && m.age >= m.straightSeconds && Overlaps(x.pos, x.radius, m.pos, Config::MissileRadius)) {
                     DetonateMissile(m);
                 }
             }
