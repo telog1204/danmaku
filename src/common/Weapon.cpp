@@ -146,6 +146,8 @@ namespace {
         int Barrels() const { return Kind().barrels; }
         // 一斉射の途中か（1門目を撃ってから、全門を撃ち切るまで）
         bool InVolley() const { return pendingShots_ > 0; }
+        // この回の処理で、撃つ間隔が来るか（一斉射の途中は除く）
+        bool FireDue(float dt) const { return pendingShots_ == 0 && cooldown_ - dt <= 0.0f; }
 
     private:
         float interval_;
@@ -217,20 +219,22 @@ namespace {
         bool fastTurning_ = false;   // 撃つのをやめて速く旋回している
     };
 
-    // ビーム砲の砲塔。角速度を持ち、少しずつ加速し、狙う方向に近づくと少しずつ減速して止まる（最高の速さは Turret と同じ考え方）。
-    // 旋回中は撃たず、狙う方向とのずれが BeamAimedDegrees 以内になったら（旋回を終えたら）撃てる。
-    // 旋回を終えて撃つ間隔を待つ間は、低速（BeamHoldTurnDegrees まで）で相手を向き続け、ずれが BeamHoldBreakDegrees を
-    // 超えたら、ふつうの旋回に戻る。狙っていた相手がいなくなって、次の相手との角度の差が TurretRetargetDegrees より
-    // 大きいときは、速い旋回（BeamFastTurnDegrees まで）で向き直る
+    // ビーム砲の砲塔。角速度を持ち、少しずつ加速し、狙う方向に近づくと少しずつ減速して止まる（最高の速さは1つ）。
+    // 旋回中は撃たない。狙う方向とのずれが BeamAimedDegrees 以内になったら旋回を終えたとみなし、
+    // 撃つ間隔を待つ間は低速（BeamHoldTurnDegrees まで）で相手を向き続ける（ずれが BeamHoldBreakDegrees を超えたら旋回に戻る）。
+    // 撃つ間隔が来たら、まず砲を止め、止まった時点でずれが小さければ撃つ。撃った後（連装は撃ち切った後）は
+    // BeamPostFireHoldSeconds の間、砲を止めたままにする
     class SmoothTurret {
     public:
-        void Update(World& world, bool hasTarget, float desired, const Target& tracked, float dt) {
+        // fireDue：この回で撃つ間隔が来る（撃つために砲を止める）
+        void Update(World& world, bool hasTarget, float desired, const Target& tracked, bool fireDue, float dt) {
             hasTarget_ = hasTarget;
             const float accel = DegreesToRadians(Config::BeamTurnAccelDegrees);
-            // 狙っていた相手がいなくなったかを見る（次の相手を狙うときの旋回の仕方を決めるため）
+            const float change = accel * dt;
+            // 狙っていた相手がいなくなったら、旋回を終えた状態を解く（次の相手へ向き直る）
             if (trackedKind_ != TargetKind::None && (tracked.kind != trackedKind_ || tracked.id != trackedId_) &&
                 world.FindTargetById(trackedKind_, trackedId_).kind == TargetKind::None) {
-                lostTarget_ = true;
+                holding_ = false;
             }
             // 狙う方向が動く速さ（相手が動く分）。相手が替わった直後は分からないので 0 とする
             const bool sameTarget = (tracked.kind == trackedKind_ && tracked.id == trackedId_);
@@ -240,32 +244,38 @@ namespace {
             trackedKind_ = tracked.kind;
             trackedId_ = tracked.id;
 
+            // 撃った後は、しばらく砲を止めたままにする
+            if (postFireHold_ > 0.0f) {
+                postFireHold_ -= dt;
+                omega_ = 0.0f;
+                diff_ = hasTarget ? std::fabs(WrapAngle(desired - facing_)) : Pi;
+                return;
+            }
             if (!hasTarget) {
                 // 狙うものがいなければ、少しずつ止まる
                 holding_ = false;
-                const float slow = accel * dt;
-                omega_ = (std::fabs(omega_) <= slow) ? 0.0f : omega_ - (omega_ > 0.0f ? slow : -slow);
-                facing_ = WrapAngle(facing_ + omega_ * dt);
+                Brake(change, dt);
                 diff_ = Pi;
                 return;
             }
             float diff = WrapAngle(desired - facing_);
-            if (lostTarget_) {
-                lostTarget_ = false;
-                holding_ = false;
-                fastTurning_ = std::fabs(diff) > DegreesToRadians(Config::TurretRetargetDegrees);
-            }
             if (holding_ && std::fabs(diff) > DegreesToRadians(Config::BeamHoldBreakDegrees)) {
-                holding_ = false;  // 低速では追い切れなくなったので、ふつうの旋回に戻る
+                holding_ = false;  // 低速では追い切れなくなったので、旋回に戻る
             }
-            const float maxSpeed = DegreesToRadians(holding_ ? Config::BeamHoldTurnDegrees
-                                                    : (fastTurning_ ? Config::BeamFastTurnDegrees : Config::BeamTurnDegrees));
-            // 狙う方向でちょうど止まれる速さ（残りの角度から決める）に、狙う方向が動く速さを足した速さを目指し、
-            // 角加速度の範囲で速さを変える（動く相手にも遅れずに向き続けられるように。最高の速さは超えない）
+            if (holding_ && fireDue) {
+                // 撃つ間隔が来た：砲を止める。止まった時点でずれが大きければ、旋回に戻って向き直る
+                Brake(change, dt);
+                diff_ = std::fabs(WrapAngle(desired - facing_));
+                if (omega_ == 0.0f && diff_ > DegreesToRadians(Config::BeamAimedDegrees)) {
+                    holding_ = false;
+                }
+                return;
+            }
+            const float maxSpeed = DegreesToRadians(holding_ ? Config::BeamHoldTurnDegrees : Config::BeamTurnDegrees);
             // ちょうど止まれる速さは、1回の処理ごとに change ずつ減速して残りの角度で止まれる速さ
-            //（v + (v−change) + … を dt 倍した距離が残りの角度になる v）
+            //（v + (v−change) + … を dt 倍した距離が残りの角度になる v）。これに狙う方向が動く速さを足した速さを目指し、
+            // 角加速度の範囲で速さを変える（動く相手にも遅れずに向き続けられるように。最高の速さは超えない）
             const float sign = (diff >= 0.0f) ? 1.0f : -1.0f;
-            const float change = accel * dt;
             const float stopSpeed =
                 (dt > 0.0f) ? 0.5f * (-change + std::sqrt(change * change + 8.0f * change * std::fabs(diff) / dt)) : 0.0f;
             const float wanted = std::max(-maxSpeed, std::min(maxSpeed, desiredRate + sign * std::min(maxSpeed, stopSpeed)));
@@ -278,27 +288,37 @@ namespace {
             facing_ = WrapAngle(facing_ + step);
             diff_ = std::fabs(WrapAngle(desired - facing_));
             if (!holding_ && diff_ <= DegreesToRadians(Config::BeamAimedDegrees)) {
-                holding_ = true;   // 旋回を終えた
-                fastTurning_ = false;
+                holding_ = true;  // 旋回を終えた
             }
         }
 
-        // 撃ってよいか（旋回を終えて、狙う方向とのずれが小さい）
-        bool CanFire() const { return hasTarget_ && holding_ && diff_ <= DegreesToRadians(Config::BeamAimedDegrees); }
+        // 撃ってよいか（旋回を終えて砲が止まっていて、狙う方向とのずれが小さい）
+        bool CanFire() const {
+            return hasTarget_ && holding_ && omega_ == 0.0f && diff_ <= DegreesToRadians(Config::BeamAimedDegrees);
+        }
+        // 撃ち終えた（連装は撃ち切った）ときに呼ぶ。しばらく砲を止めたままにする
+        void HoldAfterFire() {
+            omega_ = 0.0f;
+            postFireHold_ = Config::BeamPostFireHoldSeconds;
+        }
         float Facing() const { return facing_; }
         const float* FacingPtr() const { return &facing_; }
-        float AngularSpeed() const { return omega_; }
 
     private:
+        // 少しずつ止まる
+        void Brake(float change, float dt) {
+            omega_ = (std::fabs(omega_) <= change) ? 0.0f : omega_ - (omega_ > 0.0f ? change : -change);
+            facing_ = WrapAngle(facing_ + omega_ * dt);
+        }
+
         float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
         float omega_ = 0.0f;         // 今の旋回の速さ（ラジアン/秒。向きの正負あり）
         float diff_ = Pi;            // 狙う方向とのずれ（ラジアン）
+        float postFireHold_ = 0.0f;  // 撃った後、砲を止めておく残りの時間
         bool hasTarget_ = false;
         bool holding_ = false;       // 旋回を終えて、低速で相手を向き続けている
-        bool fastTurning_ = false;   // 相手が替わって、速い旋回で向き直っている
         TargetKind trackedKind_ = TargetKind::None;
         int trackedId_ = 0;
-        bool lostTarget_ = false;
         float lastDesired_ = 0.0f;   // 前の回の狙う方向
         bool hadDesired_ = false;
     };
@@ -477,7 +497,7 @@ namespace {
             const bool hasTarget = (target.kind != TargetKind::None);
             const float desired =
                 hasTarget ? AngleOf(LeadTarget(origin, target.pos, target.vel, Config::BeamSpeed) - origin) : turret_.Facing();
-            turret_.Update(world, hasTarget, desired, target, dt);
+            turret_.Update(world, hasTarget, desired, target, FireDue(dt), dt);
         }
 
         bool FireShot(World& world, int shot) override {
@@ -485,14 +505,16 @@ namespace {
             if (shot > 0) {
                 // 一斉射の2門目以降は狙い直さず、最初の向きのまま平行に撃つ
                 Launch(world, origin, volleyDir_, shot);
+                if (shot == Barrels() - 1) turret_.HoldAfterFire();  // 撃ち切った
                 return true;
             }
             if (!turret_.CanFire()) {
-                return false;  // 旋回を終えるまで撃たない（撃つ間隔が来ていれば、旋回を終えた瞬間に撃つ）
+                return false;  // 旋回を終えて砲が止まるまで撃たない
             }
             // ビームは、狙う方向ではなく今向いている方向へ出る
             volleyDir_ = Vec2::FromAngle(turret_.Facing());
             Launch(world, origin, volleyDir_, 0);
+            if (Barrels() == 1) turret_.HoldAfterFire();
             return true;
         }
 

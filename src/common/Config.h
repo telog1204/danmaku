@@ -48,12 +48,13 @@ namespace Config {
 
     // ビーム砲（基本型）。敵を貫き、貫くたびに威力が下がる。長い尾を含めた線全体に当たり判定がある
     constexpr float BeamInterval = 0.6f;
-    constexpr float BeamTurnDegrees = 90.0f;       // 砲が1秒間に旋回できる角度の最高（度）
-    constexpr float BeamFastTurnDegrees = 180.0f;  // 相手が替わって速く旋回するときの速さの最高（度/秒）
-    constexpr float BeamTurnAccelDegrees = 360.0f; // 旋回の角加速度（度/秒²）。少しずつ速くなり、近づくと少しずつ遅くなって止まる
+    // ビーム砲は旋回中に撃たないので、旋回の速さは1つ（相手が替わったときも同じ）
+    constexpr float BeamTurnDegrees = 360.0f;       // 砲が1秒間に旋回できる角度の最高（度）
+    constexpr float BeamTurnAccelDegrees = 1440.0f; // 旋回の角加速度（度/秒²）。0.25秒で最高の速さ。近づくと少しずつ遅くなって止まる
     constexpr float BeamAimedDegrees = 1.0f;       // 狙う方向とのずれがこれ以内なら旋回を終えたとみなし、撃てる
     constexpr float BeamHoldTurnDegrees = 30.0f;   // 旋回を終えて撃つ間隔を待つ間、相手を向き続ける低速の最高（度/秒）
     constexpr float BeamHoldBreakDegrees = 5.0f;   // 待つ間にずれがこれを超えたら、ふつうの旋回に戻る
+    constexpr float BeamPostFireHoldSeconds = 0.15f; // 撃った後（連装は撃ち切った後）、砲を止めておく時間（秒）
     constexpr float BeamPierceBulletWeight = 0.5f; // 攻撃型：線の上に乗る数を数えるときの、敵の弾1つの重み（敵本体は1）
     constexpr float BeamSpeed = 2400.0f;
     constexpr float BeamDamage = 12.0f;
