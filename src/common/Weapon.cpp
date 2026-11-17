@@ -473,6 +473,18 @@ namespace {
         // 毎回、狙う相手と方向を決めて、そちらへ砲を旋回させる
         void Think(World& world, float dt) override {
             const Vec2 origin = world.GetCore().pos;
+            // 狙っていた相手がいなくなったら（倒した・消えた）、撃つ間隔が終わるまで次の相手を選ばずに、砲を止めて待つ
+            if (target_.kind != TargetKind::None && world.FindTargetById(target_.kind, target_.id).kind == TargetKind::None) {
+                waitingRetarget_ = true;
+                target_ = Target();
+            }
+            if (waitingRetarget_) {
+                if (!FireDue(dt) || InVolley()) {
+                    if (!InVolley()) turret_.Update(world, false, turret_.Facing(), Target(), false, dt);
+                    return;
+                }
+                waitingRetarget_ = false;  // 撃つ間隔が終わった：次の相手を選び直す
+            }
             Target target;
             switch (Kind().variant) {
             case WeaponVariant::BeamAttack: {
@@ -535,6 +547,7 @@ namespace {
 
         LockOn lock_;     // 基本型：ロックオンしている相手
         Target target_;   // 今狙っている相手（攻撃型はこれをロックオンとして使う）
+        bool waitingRetarget_ = false;  // 狙っていた相手がいなくなり、撃つ間隔が終わるのを待っている
         SmoothTurret turret_;
         Vec2 volleyDir_;  // 一斉射の向き（最初の1門を撃った向き）
     };
