@@ -461,6 +461,7 @@ namespace {
             b.damage = Config::RapidGunDamage * PowerScale(Config::PartPowerRate);
             b.pierceChance = std::min(1.0f, Config::RapidPierceChancePerPart * static_cast<float>(CountPart(PartKind::Pierce)));
             world.AddPlayerBullet(b);
+            world.AddMuzzleFlash(b.pos, WeaponFamily::RapidGun);
             return true;
         }
 
@@ -609,6 +610,7 @@ namespace {
             b.decay = std::min(Config::BeamDecayMax,
                                Config::BeamDecay + Config::BeamPierceDecayPerPart * static_cast<float>(CountPart(PartKind::Pierce)));
             world.AddBeam(b);
+            world.AddMuzzleFlash(b.pos, WeaponFamily::Beam);
         }
 
         LockOn lock_;     // 基本型：ロックオンしている相手
@@ -685,6 +687,7 @@ namespace {
                                 (1.0f + Config::MissileHomingRate * static_cast<float>(CountPart(PartKind::Homing)));
                 m.blastRadius = blast;
                 world.AddMissile(m);
+                world.AddMuzzleFlash(m.pos, WeaponFamily::Missile);
             }
         }
 
@@ -699,77 +702,125 @@ namespace {
         }
     };
 
-    // 炸裂弾。基本型は敵が多い場所の、中心の少し手前で炸裂させる。決戦型はHPが最も高い敵に直撃させる
-    // 連装型は、1門ごとに向きを変えた扇形で、少しずつ時間をずらして続けて撃つ（扇形の中心は撃ち始めたときの狙い）
+    // 炸裂弾。ビーム砲と同じ砲塔（加減速して旋回し、撃つ間隔が来たら待ち伏せして、止まってから撃つ。撃った後は撃つ間隔が
+    // 終わるまで休む）を持つ。基本型は撃つ間隔が来るたびに、敵が多い場所の中心に最も近い敵を選び直し、その先読み位置の少し手前で
+    // 炸裂させる。決戦型は最大HPが最も高い敵を狙い続け、先読みした位置まで飛ばす（倒れたら、撃つ間隔が終わってから選び直す）。
+    // 連装型は、平行に並べた砲の先から、砲身の向きへ平行に、少しずつ時間をずらして撃つ（撃ち切るまで砲は回らない）
     class ShellCannon : public TimedWeapon {
     public:
         ShellCannon(const WeaponKind& kind, float firstDelay)
             : TimedWeapon(kind, Config::ShellInterval, firstDelay, Config::ShellVolleyGap) {}
 
+        bool HasTurret() const override { return true; }
+        float TurretAngle() const override { return turret_.Facing(); }
+        // 決戦型が狙っている相手（同じ種類のほかの炸裂弾と、狙いを分けるため）。基本型は特定の相手を狙い分けない
+        Target CurrentTarget() const override {
+            if (Kind().variant != WeaponVariant::ShellDecisive) return Target();
+            Target t;
+            t.kind = target_.kind;
+            t.id = target_.id;
+            return t;
+        }
+
     protected:
+        // 毎回、狙う相手と方向を決めて、そちらへ砲を旋回させる
+        void Think(World& world, float dt) override {
+            const Vec2 origin = world.GetCore().pos;
+            const Target kept = (target_.kind != TargetKind::None) ? world.FindTargetById(target_.kind, target_.id) : Target();
+            Target target;
+            if (Kind().variant == WeaponVariant::ShellDecisive) {
+                // 狙っていた相手がいなくなったら（倒した・消えた）、撃つ間隔が終わるまで次の相手を選ばずに、砲を止めて待つ
+                if (target_.kind != TargetKind::None && kept.kind == TargetKind::None) {
+                    waitingRetarget_ = true;
+                    target_ = Target();
+                }
+                if (waitingRetarget_) {
+                    if (!FireDue(dt) || InVolley()) {
+                        if (!InVolley()) turret_.Update(world, false, turret_.Facing(), Target(), false, dt);
+                        return;
+                    }
+                    waitingRetarget_ = false;
+                }
+                // 最大HPが最も高い敵（同じなら近い方）。今狙っている相手も最も高ければ、狙い続ける
+                target = world.FindHighestHpTarget(origin, world.TargetsOfSameKind(this), false, target_);
+            } else {
+                // 基本型：撃つ間隔が来るたびに選び直す（何も狙っていないときは、すぐに選ぶ）
+                target = kept;
+                if (!InVolley() && (target.kind == TargetKind::None || (FireDue(dt) && !picked_))) {
+                    target = PickCrowdTarget(world, origin);
+                    picked_ = FireDue(dt);
+                }
+            }
+            target_ = target;
+            if (InVolley()) {
+                return;  // 連装の一斉射は、撃ち切るまで砲を回さない（全門が砲身の向きのとおりに平行に出るように）
+            }
+            const bool hasTarget = (target.kind != TargetKind::None);
+            const float desired =
+                hasTarget ? AngleOf(LeadTarget(origin, target.pos, target.vel, Config::ShellSpeed) - origin) : turret_.Facing();
+            turret_.Update(world, hasTarget, desired, target, FireDue(dt), dt);
+        }
+
         bool FireShot(World& world, int shot) override {
             const Vec2 origin = world.GetCore().pos;
             if (shot > 0) {
-                // 一斉射の2発目以降は、撃ち始めたときの向きと距離を使う
+                // 一斉射の2発目以降は狙い直さず、最初の向きと距離のまま、平行に撃つ
                 Launch(world, origin, volleyAngle_, volleyDistance_, shot);
+                if (shot == Barrels() - 1) Rest();  // 撃ち切った
                 return true;
             }
-            Vec2 aim;
-            float distance = 0.0f;
-            if (Kind().variant == WeaponVariant::ShellDecisive) {
-                // 同じ種類のほかの武装が狙っている相手を除いて、HPが最も高い敵
-                const Target target = world.FindHighestHpTarget(origin, world.TargetsOfSameKind(this));
-                if (target.kind == TargetKind::None) return false;
-                decisiveTarget_ = target;
-                aim = LeadTarget(origin, target.pos, target.vel, Config::ShellSpeed);
-                // 狙った位置（先読みした位置）まで飛ぶ。途中で当たらなければ、そこで炸裂する（外れても爆炎と破片で巻き込む）
-                distance = std::max(Config::CoreRadius + 10.0f, (aim - origin).Length());
-            } else {
-                if (!world.FindCrowdCenter(aim)) {
-                    // 敵本体がいなければ、最も近い敵の弾のところで炸裂させる
-                    const Target target = world.FindNearestTarget(origin);
-                    if (target.kind == TargetKind::None) return false;
-                    aim = target.pos;
-                }
-                distance = std::max(Config::CoreRadius + 10.0f, (aim - origin).Length() - Config::ShellShortDistance);
+            if (target_.kind == TargetKind::None || !turret_.CanFire()) {
+                return false;  // 旋回を終えて砲が止まるまで撃たない
             }
-            const Vec2 toAim = aim - origin;
-            if (toAim.LengthSq() <= 0.0f) return false;
-            volleyAngle_ = AngleOf(toAim);
-            volleyDistance_ = distance;
+            // 炸裂させる位置までの距離：決戦型は先読みした相手の位置、基本型はその少し手前（外れても爆炎と破片で巻き込む）
+            const Vec2 aim = LeadTarget(origin, target_.pos, target_.vel, Config::ShellSpeed);
+            const float reach = (aim - origin).Length();
+            const float distance = (Kind().variant == WeaponVariant::ShellDecisive) ? reach : reach - Config::ShellShortDistance;
+            volleyAngle_ = turret_.Facing();  // 炸裂弾は、狙う方向ではなく今向いている方向へ出る
+            volleyDistance_ = std::max(Config::ShellBarrelLength + 10.0f, distance);
             Launch(world, origin, volleyAngle_, volleyDistance_, 0);
+            if (Barrels() == 1) Rest();
             return true;
         }
 
     private:
-        // shot 番目の砲の1発を撃つ（扇形の中で、その砲の向きにずらす）
-        void Launch(World& world, const Vec2& origin, float centerAngle, float distance, int shot) {
-            const Vec2 dir = Vec2::FromAngle(centerAngle + DegreesToRadians(BarrelOffset(shot, Barrels(), Config::ShellFanDegrees)));
-            {
-                Shell s;
-                s.pos = origin + dir * Config::CoreRadius;
-                s.vel = dir * Config::ShellSpeed;
-                s.distanceLeft = distance - Config::CoreRadius;
-                s.damageScale = PowerScale(Config::ShellPartPowerRate);
-                s.flameRadius = Config::ShellFlameRadius *
-                                (1.0f + Config::ShellFlameRadiusRate * static_cast<float>(CountPart(PartKind::FlameRadius)));
-                s.flameSeconds = Config::ShellFlameSeconds *
-                                 (1.0f + Config::ShellFlameDurationRate * static_cast<float>(CountPart(PartKind::FlameDuration)));
-                s.fragmentCount = Config::ShellFragmentCount + Config::ShellFragmentsPerPart * CountPart(PartKind::Fragments);
-                world.AddShell(s);
-            }
+        // 敵が多い場所の中心に最も近い敵（敵本体がいなければ、最も近い敵の弾）
+        static Target PickCrowdTarget(World& world, const Vec2& origin) {
+            Vec2 center;
+            return world.FindCrowdCenter(center) ? world.FindNearestTarget(center) : world.FindNearestTarget(origin);
         }
 
-        float volleyAngle_ = 0.0f;
-        float volleyDistance_ = 0.0f;
-
-    public:
-        Target CurrentTarget() const override {
-            return Kind().variant == WeaponVariant::ShellDecisive ? decisiveTarget_ : Target();
+        // 撃ち終えた（連装は撃ち切った）：撃つ間隔が終わるまで砲を休ませ、基本型は次に撃つ間隔が来たら選び直す
+        void Rest() {
+            turret_.HoldAfterFire();
+            picked_ = false;
         }
 
-    private:
-        Target decisiveTarget_;
+        // shot 番目の砲の1発を撃つ（平行に並べた砲の先から、砲身の向きへ）
+        void Launch(World& world, const Vec2& origin, float angle, float distance, int shot) {
+            const Vec2 dir = Vec2::FromAngle(angle);
+            const Vec2 side = dir.Perpendicular();
+            Shell s;
+            // 撃った砲の砲身の先から出る（画面に描く砲身と同じ長さ・並び）
+            s.pos = origin + dir * Config::ShellBarrelLength + side * BarrelOffset(shot, Barrels(), Config::ShellBarrelSpacing);
+            s.vel = dir * Config::ShellSpeed;
+            s.distanceLeft = distance - Config::ShellBarrelLength;
+            s.damageScale = PowerScale(Config::ShellPartPowerRate);
+            s.flameRadius = Config::ShellFlameRadius *
+                            (1.0f + Config::ShellFlameRadiusRate * static_cast<float>(CountPart(PartKind::FlameRadius)));
+            s.flameSeconds = Config::ShellFlameSeconds *
+                             (1.0f + Config::ShellFlameDurationRate * static_cast<float>(CountPart(PartKind::FlameDuration)));
+            s.fragmentCount = Config::ShellFragmentCount + Config::ShellFragmentsPerPart * CountPart(PartKind::Fragments);
+            world.AddShell(s);
+            world.AddMuzzleFlash(s.pos, WeaponFamily::Shell);
+        }
+
+        SmoothTurret turret_;
+        Target target_;                 // 今狙っている相手
+        bool waitingRetarget_ = false;  // 決戦型：狙っていた相手がいなくなり、撃つ間隔が終わるのを待っている
+        bool picked_ = false;           // 基本型：今の撃つ間隔が来てから、もう選び直した
+        float volleyAngle_ = 0.0f;      // 一斉射の向き（最初の1門を撃った向き）
+        float volleyDistance_ = 0.0f;   // 一斉射の炸裂させる距離（コアの中心から）
     };
 
     int BaseEnergy(WeaponVariant v) {

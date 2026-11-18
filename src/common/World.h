@@ -19,6 +19,7 @@ struct Core {
 // 丸い弾（速射砲の弾・炸裂弾の破片・敵の弾）
 struct Bullet {
     int id = 0;
+    float smokeDistance = 0.0f;  // 敵の弾：前に煙の粒を置いてから進んだ距離
     Vec2 pos;
     Vec2 vel;
     float radius = 0.0f;
@@ -56,7 +57,24 @@ struct Missile {
     float damage = 0.0f;
     float turnDegrees = 0.0f;   // 1秒間に曲がれる角度
     float blastRadius = 0.0f;   // 消えるときの爆発の半径
+    float smokeDistance = 0.0f; // 前に煙の粒を置いてから進んだ距離
     bool alive = true;
+};
+
+// マズルフラッシュ：撃った瞬間に、弾が出た位置が光る（見た目だけ。少しずつ小さく暗くなって消える）
+struct MuzzleFlash {
+    Vec2 pos;
+    float radius = 0.0f;
+    float life = 0.0f;
+    float maxLife = 0.0f;
+    WeaponFamily family = WeaponFamily::RapidGun;  // 色を決める
+};
+
+// 煙の粒：自分の誘導弾と敵の弾が飛んだ跡に残る（見た目だけ。少しずつ広がりながら薄くなって消える）
+struct Smoke {
+    Vec2 pos;
+    float life = 0.0f;
+    bool enemy = false;  // 敵の弾の煙（少し赤みのある灰色）
 };
 
 // 炸裂弾。狙った位置まで飛ぶか、途中で敵に当たると炸裂する
@@ -179,6 +197,8 @@ public:
     const std::vector<Missile>& Missiles() const { return missiles_; }
     const std::vector<Shell>& Shells() const { return shells_; }
     const std::vector<Explosion>& Explosions() const { return explosions_; }
+    const std::vector<MuzzleFlash>& MuzzleFlashes() const { return muzzleFlashes_; }
+    const std::vector<Smoke>& Smokes() const { return smokes_; }
     const std::vector<std::unique_ptr<Weapon>>& Weapons() const { return weapons_; }
     const std::vector<Message>& Messages() const { return messages_; }
 
@@ -257,6 +277,7 @@ public:
     void AddBeam(const Beam& b) { beams_.push_back(b); }
     void AddMissile(const Missile& m) { missiles_.push_back(m); }
     void AddShell(const Shell& s) { shells_.push_back(s); }
+    void AddMuzzleFlash(const Vec2& pos, WeaponFamily family);  // 撃った瞬間に、弾が出た位置を光らせる
 
 private:
     void Step(float dt);
@@ -287,6 +308,8 @@ private:
     void DetonateMissile(Missile& m);
     void BurstShell(Shell& s);
     void AddExplosion(const Vec2& pos, float radius, float damage, float seconds, ExplosionSource source, bool harmless = false);
+    void AddSmoke(const Vec2& pos, bool enemy);  // 煙の粒を置く（上限を超える間は置かない）
+    void AgeEffects(float dt);                   // マズルフラッシュと煙の粒の時間を進め、消えたものを除く
     bool HitWithBullet(Bullet& b, int targetId);  // 速射砲の弾が当たったとき。貫いて進むなら true
     void RemoveDead();
 
@@ -305,6 +328,8 @@ private:
     std::vector<Shell> shells_;
     std::vector<Explosion> explosions_;
     std::vector<Explosion> pendingExplosions_;  // 当たり判定の途中で起きた爆発（判定が終わってから加える）
+    std::vector<MuzzleFlash> muzzleFlashes_;
+    std::vector<Smoke> smokes_;
     std::vector<Message> messages_;
     std::mt19937 rng_;
     int nextId_ = 1;
