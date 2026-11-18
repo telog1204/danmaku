@@ -106,6 +106,8 @@ void World::Reset() {
     shells_.clear();
     explosions_.clear();
     pendingExplosions_.clear();
+    muzzleFlashes_.clear();
+    smokes_.clear();
     messages_.clear();
     rewardChoices_.clear();
     pendingEnemies_.clear();
@@ -651,6 +653,7 @@ void World::Step(float dt) {
     MoveShells(dt);
     CrashState::SetPhase(CrashState::Phase::Explosions);
     AgeExplosions(dt);
+    AgeEffects(dt);
     CrashState::SetPhase(CrashState::Phase::Collisions);
     HandleCollisions();
     CrashState::SetPhase(CrashState::Phase::Messages);
@@ -946,6 +949,19 @@ void World::MoveEnemyBullets(float dt) {
         b.vel = Vec2::FromAngle(heading + std::max(-maxTurn, std::min(maxTurn, diff))) * Config::EnemyMissileSpeed;
     }
     MoveBullets(enemyBullets_, dt);
+    // 敵の弾は、飛んだ跡に煙を残す（進んだ距離ごとに、尾の位置へ煙の粒を置く）
+    for (Bullet& b : enemyBullets_) {
+        if (!b.alive) continue;
+        const float speed = b.vel.Length();
+        if (speed <= 0.0f) continue;
+        const Vec2 dir = b.vel * (1.0f / speed);
+        b.smokeDistance += speed * dt;
+        while (b.smokeDistance >= Config::SmokeSpacing) {
+            // ちょうど距離30ごとの位置に置く（1回の処理で進んだ分の行き過ぎを戻す）
+            b.smokeDistance -= Config::SmokeSpacing;
+            AddSmoke(b.pos - dir * (1.8f * b.radius + b.smokeDistance), true);
+        }
+    }
 }
 
 void World::MoveBeams(float dt) {
@@ -987,6 +1003,13 @@ void World::MoveMissiles(float dt) {
             }
         }
         m.pos += Vec2::FromAngle(m.heading) * (Config::MissileSpeed * dt);
+        // 飛んだ跡に煙を残す（進んだ距離ごとに、尾の位置へ煙の粒を置く）
+        m.smokeDistance += Config::MissileSpeed * dt;
+        while (m.smokeDistance >= Config::SmokeSpacing) {
+            // ちょうど距離30ごとの位置に置く（1回の処理で進んだ分の行き過ぎを戻す）
+            m.smokeDistance -= Config::SmokeSpacing;
+            AddSmoke(m.pos - Vec2::FromAngle(m.heading) * (9.0f + m.smokeDistance), false);
+        }
     }
 }
 
@@ -1000,6 +1023,57 @@ void World::MoveShells(float dt) {
             BurstShell(s);
         }
     }
+}
+
+void World::AddMuzzleFlash(const Vec2& pos, WeaponFamily family) {
+    MuzzleFlash f;
+    f.pos = pos;
+    f.family = family;
+    switch (family) {
+    case WeaponFamily::RapidGun:
+        f.radius = Config::RapidFlashRadius;
+        f.maxLife = Config::RapidFlashSeconds;
+        break;
+    case WeaponFamily::Beam:
+        f.radius = Config::BeamFlashRadius;
+        f.maxLife = Config::BeamFlashSeconds;
+        break;
+    case WeaponFamily::Missile:
+        f.radius = Config::MissileFlashRadius;
+        f.maxLife = Config::MissileFlashSeconds;
+        break;
+    case WeaponFamily::Shell:
+        f.radius = Config::ShellFlashRadius;
+        f.maxLife = Config::ShellFlashSeconds;
+        break;
+    }
+    f.life = f.maxLife;
+    muzzleFlashes_.push_back(f);
+}
+
+void World::AddSmoke(const Vec2& pos, bool enemy) {
+    if (smokes_.size() >= static_cast<size_t>(Config::SmokeMax)) {
+        return;  // 上限を超える間は置かない（描く処理が重くなりすぎないように）
+    }
+    Smoke s;
+    s.pos = pos;
+    s.life = Config::SmokeSeconds;
+    s.enemy = enemy;
+    smokes_.push_back(s);
+}
+
+void World::AgeEffects(float dt) {
+    for (MuzzleFlash& f : muzzleFlashes_) {
+        f.life -= dt;
+    }
+    muzzleFlashes_.erase(std::remove_if(muzzleFlashes_.begin(), muzzleFlashes_.end(),
+                                        [](const MuzzleFlash& f) { return f.life <= 0.0f; }),
+                         muzzleFlashes_.end());
+    for (Smoke& s : smokes_) {
+        s.life -= dt;
+    }
+    smokes_.erase(std::remove_if(smokes_.begin(), smokes_.end(), [](const Smoke& s) { return s.life <= 0.0f; }),
+                  smokes_.end());
 }
 
 void World::AgeExplosions(float dt) {

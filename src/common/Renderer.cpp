@@ -23,27 +23,37 @@ namespace {
         DrawCircle(Px(core.pos.x), Px(core.pos.y), Sz(core.radius), GetColor(80, 220, 255), TRUE);
     }
 
-    // 砲身（速射砲・ビーム砲）：コアの中心から、今向いている方向へ伸ばす。連装は、弾が出る砲の並びに合わせて平行に並べる。
-    // rapid が true なら速射砲だけ、false ならビーム砲だけを描く（ビーム砲を先に描いて、速射砲を上に重ねるため）
-    void DrawBarrels(const World& world, bool rapidOnly) {
+    // 砲身（速射砲・ビーム砲・炸裂弾）：コアの中心から、今向いている方向へ伸ばす。連装は、弾が出る砲の並びに合わせて平行に並べる。
+    // family の系統の砲身だけを描く（炸裂弾 → ビーム砲 → 速射砲の順に描いて、細い砲身を上に重ねるため）
+    void DrawBarrels(const World& world, WeaponFamily family) {
         const Vec2 center = world.GetCore().pos;
         for (const auto& w : world.Weapons()) {
-            if (!w->HasTurret()) continue;  // 向きを持たない武装（誘導兵器・炸裂弾）は描かない
-            const bool rapid = (FamilyOf(w->Kind()) == WeaponFamily::RapidGun);
-            if (rapid != rapidOnly) continue;
+            if (!w->HasTurret()) continue;  // 向きを持たない武装（誘導兵器）は描かない
+            if (FamilyOf(w->Kind()) != family) continue;
             const int barrels = w->Kind().barrels;
-            // 速射砲の四連装は、撃ち方と同じく2門の並び
-            const int mounts = (rapid && barrels == 4) ? 2 : barrels;
-            const float spacing = rapid ? Config::RapidBarrelSpacing : Config::BeamBarrelSpacing;
-            const float length = rapid ? Config::RapidBarrelLength : Config::BeamBarrelLength;
-            const unsigned int color = rapid ? GetColor(255, 60, 40) : GetColor(150, 220, 255);
-            const int thickness = Sz(rapid ? 3.0f : 4.0f);
+            float spacing = Config::BeamBarrelSpacing;
+            float length = Config::BeamBarrelLength;
+            unsigned int color = GetColor(150, 220, 255);
+            float thickness = 4.0f;
+            int mounts = barrels;
+            if (family == WeaponFamily::RapidGun) {
+                spacing = Config::RapidBarrelSpacing;
+                length = Config::RapidBarrelLength;
+                color = GetColor(255, 60, 40);
+                thickness = 3.0f;
+                mounts = (barrels == 4) ? 2 : barrels;  // 速射砲の四連装は、撃ち方と同じく2門の並び
+            } else if (family == WeaponFamily::Shell) {
+                spacing = Config::ShellBarrelSpacing;
+                length = Config::ShellBarrelLength;
+                color = GetColor(255, 140, 40);
+                thickness = 6.0f;
+            }
             const Vec2 dir = Vec2::FromAngle(w->TurretAngle());
             const Vec2 side = dir.Perpendicular();
             for (int i = 0; i < mounts; ++i) {
                 const Vec2 base = center + side * ((static_cast<float>(i) - (mounts - 1) * 0.5f) * spacing);
                 const Vec2 tip = base + dir * length;
-                DrawLine(Px(base.x), Px(base.y), Px(tip.x), Px(tip.y), color, thickness);
+                DrawLine(Px(base.x), Px(base.y), Px(tip.x), Px(tip.y), color, Sz(thickness));
             }
         }
     }
@@ -134,16 +144,6 @@ namespace {
     }
 
     // 敵の誘導弾：進む向きを指す細長い三角
-    void DrawEnemyMissile(const Bullet& b) {
-        const Vec2 f = b.vel.Normalized();
-        const Vec2 s = f.Perpendicular();
-        const Vec2 tip = b.pos + f * 8.0f;
-        const Vec2 left = b.pos - f * 5.0f + s * 3.5f;
-        const Vec2 right = b.pos - f * 5.0f - s * 3.5f;
-        DrawCircle(Px(b.pos.x), Px(b.pos.y), Sz(9.0f), GetColor(60, 15, 30), TRUE);
-        DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 110, 150), TRUE);
-    }
-
     void DrawHud(const World& world) {
         const Core& core = world.GetCore();
         // HPのゲージ
@@ -203,16 +203,60 @@ namespace {
     }
 
     // 速射砲の弾：赤一色の短い線（進む向きの後ろへ尾を伸ばす。当たり判定は丸のまま）
+    // 速射砲の弾：赤い短い線。太く暗い外側の光の上に、本体と、細く明るい芯を重ねて光らせる（加算合成）
     void DrawRapidBullet(const Bullet& b) {
         const Vec2 tail = b.pos - b.vel.Normalized() * Config::RapidBulletTailLength;
-        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(255, 60, 40), Sz(3.0f));
+        const int x1 = Px(tail.x), y1 = Px(tail.y), x2 = Px(b.pos.x), y2 = Px(b.pos.y);
+        DrawLine(x1, y1, x2, y2, GetColor(110, 20, 15), Sz(9.0f));
+        DrawLine(x1, y1, x2, y2, GetColor(255, 60, 40), Sz(3.0f));
+        DrawLine(x1, y1, x2, y2, GetColor(255, 190, 170), Sz(1.0f));
     }
 
+    // ビーム：太く暗い外側の光、中間の光、明るい本体を重ね、先端に光の丸と白い丸を描く（加算合成）
     void DrawBeam(const Beam& b) {
         const Vec2 tail = b.Tail();
-        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(30, 60, 90), Sz(7.0f));
-        DrawLine(Px(tail.x), Px(tail.y), Px(b.pos.x), Px(b.pos.y), GetColor(150, 220, 255), Sz(3.0f));
-        DrawCircle(Px(b.pos.x), Px(b.pos.y), Sz(3.0f), GetColor(255, 255, 255), TRUE);
+        const int x1 = Px(tail.x), y1 = Px(tail.y), x2 = Px(b.pos.x), y2 = Px(b.pos.y);
+        DrawLine(x1, y1, x2, y2, GetColor(40, 80, 120), Sz(12.0f));
+        DrawLine(x1, y1, x2, y2, GetColor(90, 160, 220), Sz(6.0f));
+        DrawLine(x1, y1, x2, y2, GetColor(210, 245, 255), Sz(3.0f));
+        DrawCircle(x2, y2, Sz(8.0f), GetColor(70, 130, 170), TRUE);
+        DrawCircle(x2, y2, Sz(3.0f), GetColor(255, 255, 255), TRUE);
+    }
+
+    // マズルフラッシュ：系統ごとの色の光る丸。時間が経つほど小さく暗くなる（加算合成）
+    void DrawMuzzleFlash(const MuzzleFlash& f) {
+        int r = 255, g = 110, b = 60;  // 速射砲：赤橙
+        if (f.family == WeaponFamily::Beam) {
+            r = 170; g = 230; b = 255;  // 水色
+        } else if (f.family == WeaponFamily::Missile) {
+            r = 255; g = 230; b = 90;   // 黄色
+        } else if (f.family == WeaponFamily::Shell) {
+            r = 255; g = 160; b = 60;   // 橙
+        }
+        const float k = f.maxLife > 0.0f ? std::max(0.0f, std::min(1.0f, f.life / f.maxLife)) : 0.0f;
+        const float radius = f.radius * (0.5f + 0.5f * k);
+        DrawGlowCircle(f.pos, radius, static_cast<int>(r * k), static_cast<int>(g * k), static_cast<int>(b * k));
+    }
+
+    // 煙の粒：灰色（敵の弾は少し赤みのある灰色）の丸。時間が経つほど広がり、薄くなる（半透明で描く）
+    void DrawSmoke(const Smoke& s) {
+        const float k = std::max(0.0f, std::min(1.0f, s.life / Config::SmokeSeconds));  // 残りの割合
+        const float radius = Config::SmokeRadiusEnd + (Config::SmokeRadiusStart - Config::SmokeRadiusEnd) * k;
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, static_cast<int>(Config::SmokeAlpha * k));
+        DrawCircle(Px(s.pos.x), Px(s.pos.y), Sz(radius), s.enemy ? GetColor(150, 120, 130) : GetColor(140, 140, 150), TRUE);
+    }
+
+    // 敵の弾：自分の誘導弾と同じく、進む向きを指す細長い三角と後ろの炎で描く（大きさは当たり判定の半径に合わせる）
+    void DrawEnemyBullet(const Bullet& b) {
+        const float k = b.radius / Config::EnemyMissileRadius;
+        const Vec2 f = b.vel.Normalized();
+        const Vec2 s = f.Perpendicular();
+        const Vec2 tip = b.pos + f * (8.0f * k);
+        const Vec2 left = b.pos - f * (5.0f * k) + s * (3.5f * k);
+        const Vec2 right = b.pos - f * (5.0f * k) - s * (3.5f * k);
+        const Vec2 flame = b.pos - f * (9.0f * k);
+        DrawCircle(Px(flame.x), Px(flame.y), Sz(3.0f * k), GetColor(60, 15, 30), TRUE);
+        DrawTriangle(Px(tip.x), Px(tip.y), Px(left.x), Px(left.y), Px(right.x), Px(right.y), GetColor(255, 110, 150), TRUE);
     }
 
     void DrawMissile(const Missile& m) {
@@ -241,9 +285,14 @@ void DrawWorld(const World& world) {
     // 誘導兵器の発射装置と砲身はコアの後ろに、色がそのまま見えるように描く（発射装置の上にビーム砲、その上に速射砲を重ねる）
     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
     DrawMissileLaunchers(world);
-    DrawBarrels(world, false);
-    DrawBarrels(world, true);
+    DrawBarrels(world, WeaponFamily::Shell);
+    DrawBarrels(world, WeaponFamily::Beam);
+    DrawBarrels(world, WeaponFamily::RapidGun);
     DrawCore(world.GetCore());
+    // 煙の軌跡は、光るものの下に半透明で描く
+    for (const Smoke& s : world.Smokes()) {
+        DrawSmoke(s);
+    }
     // 光るもの（敵・弾）は加算合成で描く
     SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
     for (const Enemy& e : world.Enemies()) {
@@ -269,11 +318,10 @@ void DrawWorld(const World& world) {
         DrawGlowCircle(s.pos, Config::ShellRadius, 255, 140, 40);
     }
     for (const Bullet& b : world.EnemyBullets()) {
-        if (b.homing) {
-            DrawEnemyMissile(b);
-        } else {
-            DrawGlowCircle(b.pos, b.radius, 255, 90, 160);
-        }
+        DrawEnemyBullet(b);
+    }
+    for (const MuzzleFlash& f : world.MuzzleFlashes()) {
+        DrawMuzzleFlash(f);
     }
     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 

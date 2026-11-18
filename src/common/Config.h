@@ -133,8 +133,9 @@ namespace Config {
     constexpr float MissileLauncherLength = 30.0f;   // 発射装置：コアの中心から先端までの長さ
     constexpr float MissileLauncherHeight = 14.0f;   // 発射装置：高さ
     constexpr float MissileTubeSpacing = 8.0f;       // 発射装置：2つの出口の間隔
-    constexpr float ShellVolleyGap = 0.1f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）
-    constexpr float ShellFanDegrees = 8.0f;          // 炸裂弾：扇形で1門ごとに向きを変える角度
+    constexpr float ShellVolleyGap = 0.4f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）。爆炎が残る時間と同じにして、爆炎が重ならずに続けて燃えるように
+    constexpr float ShellBarrelLength = 40.0f;       // 炸裂弾：画面に描く砲身の長さ（コアの中心から先端まで）
+    constexpr float ShellBarrelSpacing = 10.0f;      // 炸裂弾：並べた砲の間隔（平行に並べ、弾も平行に出る）
 
     // ロックオン：「最も近い敵」を狙う武装は、近い順にこの数までの中からランダムに選んでロックオンする
     constexpr size_t LockOnCandidates = 3;
@@ -246,6 +247,24 @@ namespace Config {
     constexpr float EnemyBulletBlastRadius = 18.0f;
     constexpr float EnemyBulletBlastDamage = 1.0f;
     constexpr float EnemyBulletBlastSeconds = 0.12f;
+
+    // マズルフラッシュ（撃った瞬間に、弾が出た位置が光る。見た目だけ）。半径はフィールド上の大きさ、時間は消えるまで
+    constexpr float RapidFlashRadius = 5.0f;
+    constexpr float RapidFlashSeconds = 0.04f;   // 撃つ間隔（最短0.05秒）より短くして、連射でも点滅して見えるように
+    constexpr float BeamFlashRadius = 9.0f;
+    constexpr float BeamFlashSeconds = 0.08f;
+    constexpr float MissileFlashRadius = 7.0f;
+    constexpr float MissileFlashSeconds = 0.10f;
+    constexpr float ShellFlashRadius = 16.0f;
+    constexpr float ShellFlashSeconds = 0.12f;
+
+    // 煙の軌跡（自分の誘導弾と、敵の弾すべて。見た目だけ）。進んだ距離ごとに、尾の位置へ煙の粒を置く
+    constexpr float SmokeSpacing = 30.0f;        // 煙の粒を置く間隔（進んだ距離）
+    constexpr float SmokeSeconds = 0.6f;         // 煙の粒が薄くなって消えるまでの時間
+    constexpr float SmokeRadiusStart = 3.0f;     // 置いたときの半径
+    constexpr float SmokeRadiusEnd = 10.0f;      // 消えるときの半径
+    constexpr int SmokeAlpha = 120;              // 置いたときの濃さ（0〜255）
+    constexpr int SmokeMax = 4000;               // 煙の粒の数の上限（超える間は新しく置かない。描く処理が重くなりすぎないように）
 
     // 敵本体が消えるとき（倒れたとき・コアに体当たりしたとき）の爆発。周りの敵本体・敵の弾を巻き込み、自分の誘導弾を誘爆させる。
     // この爆発で倒れた敵・壊れた敵の弾の爆発は見た目だけ（何も巻き込まない）にして、敵の爆発同士では連鎖しない
