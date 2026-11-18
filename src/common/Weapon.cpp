@@ -458,7 +458,8 @@ namespace {
                     side * BarrelOffset(mount, mounts, Config::RapidBarrelSpacing);
             b.vel = dir * Config::RapidGunBulletSpeed;
             b.radius = Config::PlayerBulletRadius;
-            b.damage = Config::RapidGunDamage * PowerScale(Config::PartPowerRate);
+            // 威力強化：中の敵に当たったときに、低い確率で倒す（重には効かない）
+            b.mediumKillChance = Config::RapidMediumKillChancePerPart * static_cast<float>(CountPart(PartKind::Power));
             b.pierceChance = std::min(1.0f, Config::RapidPierceChancePerPart * static_cast<float>(CountPart(PartKind::Pierce)));
             world.AddPlayerBullet(b);
             world.AddMuzzleFlash(b.pos, WeaponFamily::RapidGun);
