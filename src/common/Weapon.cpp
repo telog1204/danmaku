@@ -222,11 +222,13 @@ namespace {
     // ビーム砲の砲塔。角速度を持ち、少しずつ加速し、狙う方向に近づくと少しずつ減速して止まる（最高の速さは1つ）。
     // 旋回中は撃たない。狙う方向とのずれが BeamAimedDegrees 以内になったら旋回を終えたとみなし、
     // 撃つ間隔を待つ間は低速（BeamHoldTurnDegrees まで）で相手を向き続ける（ずれが BeamHoldBreakDegrees を超えたら旋回に戻る）。
-    // 撃つ間隔が来たら、まず砲を止め、止まった時点でずれが小さければ撃つ。撃った後（連装は撃ち切った後）は
-    // BeamPostFireHoldSeconds の間、砲を止めたままにする
+    // 撃つ間隔が来たら待ち伏せする：向き直って止まるまでの時間に相手が進む先（待ち伏せの向き）を計算して固定し、
+    // そこへ向き直って止まり、相手の狙う方向がずれ BeamAimedDegrees 以内に入った瞬間に撃つ（相手が通り過ぎたり、
+    // 近づいてこなかったりしたら計算し直す）。撃った後（連装は撃ち切った後）は
+    // BeamPostFireHoldSeconds の間、砲を止めたままにし、その後も撃つ間隔が来るまで止まって休む（相手が残っていても向き続けない）
     class SmoothTurret {
     public:
-        // fireDue：この回で撃つ間隔が来る（撃つために砲を止める）
+        // fireDue：この回で撃つ間隔が来る（待ち伏せして撃つ）
         void Update(World& world, bool hasTarget, float desired, const Target& tracked, bool fireDue, float dt) {
             hasTarget_ = hasTarget;
             const float accel = DegreesToRadians(Config::BeamTurnAccelDegrees);
@@ -238,6 +240,7 @@ namespace {
             }
             // 狙う方向が動く速さ（相手が動く分）。相手が替わった直後は分からないので 0 とする
             const bool sameTarget = (tracked.kind == trackedKind_ && tracked.id == trackedId_);
+            const bool hadPrevDesired = hadDesired_;
             const float desiredRate = (sameTarget && hadDesired_ && dt > 0.0f) ? WrapAngle(desired - lastDesired_) / dt : 0.0f;
             lastDesired_ = desired;
             hadDesired_ = hasTarget;
@@ -251,41 +254,39 @@ namespace {
                 diff_ = hasTarget ? std::fabs(WrapAngle(desired - facing_)) : Pi;
                 return;
             }
+            // 撃った後の休み：撃つ間隔が来るまで砲を止めたままにする（狙っていた相手がいなくなったときと同じ動き）。
+            // 撃つ間隔が来たら休みを解き、相手へ向き直る
+            if (resting_) {
+                if (!fireDue) {
+                    holding_ = false;
+                    Brake(change, dt);
+                    diff_ = hasTarget ? std::fabs(WrapAngle(desired - facing_)) : Pi;
+                    return;
+                }
+                resting_ = false;
+            }
             if (!hasTarget) {
                 // 狙うものがいなければ、少しずつ止まる
                 holding_ = false;
+                ambushing_ = false;
                 Brake(change, dt);
                 diff_ = Pi;
                 return;
             }
+            if (!sameTarget) {
+                ambushing_ = false;  // 相手が替わったら、待ち伏せを計算し直す
+            }
+            // 撃つ間隔が来た：待ち伏せする（相手が動く速さが分かってから。分からない最初の1回は、ふつうに向き直る）
+            if (fireDue && sameTarget && hadPrevDesired) {
+                Ambush(desired, desiredRate, change, dt);
+                return;
+            }
+            ambushing_ = false;
             float diff = WrapAngle(desired - facing_);
             if (holding_ && std::fabs(diff) > DegreesToRadians(Config::BeamHoldBreakDegrees)) {
                 holding_ = false;  // 低速では追い切れなくなったので、旋回に戻る
             }
-            if (holding_ && fireDue) {
-                // 撃つ間隔が来た：砲を止める。止まった時点でずれが大きければ、旋回に戻って向き直る
-                Brake(change, dt);
-                diff_ = std::fabs(WrapAngle(desired - facing_));
-                if (omega_ == 0.0f && diff_ > DegreesToRadians(Config::BeamAimedDegrees)) {
-                    holding_ = false;
-                }
-                return;
-            }
-            const float maxSpeed = DegreesToRadians(holding_ ? Config::BeamHoldTurnDegrees : Config::BeamTurnDegrees);
-            // ちょうど止まれる速さは、1回の処理ごとに change ずつ減速して残りの角度で止まれる速さ
-            //（v + (v−change) + … を dt 倍した距離が残りの角度になる v）。これに狙う方向が動く速さを足した速さを目指し、
-            // 角加速度の範囲で速さを変える（動く相手にも遅れずに向き続けられるように。最高の速さは超えない）
-            const float sign = (diff >= 0.0f) ? 1.0f : -1.0f;
-            const float stopSpeed =
-                (dt > 0.0f) ? 0.5f * (-change + std::sqrt(change * change + 8.0f * change * std::fabs(diff) / dt)) : 0.0f;
-            const float wanted = std::max(-maxSpeed, std::min(maxSpeed, desiredRate + sign * std::min(maxSpeed, stopSpeed)));
-            omega_ += std::max(-change, std::min(change, wanted - omega_));
-            float step = omega_ * dt;
-            if (step * diff > 0.0f && std::fabs(step) > std::fabs(diff)) {
-                step = diff;  // 行き過ぎない
-                if (dt > 0.0f) omega_ = step / dt;
-            }
-            facing_ = WrapAngle(facing_ + step);
+            Turn(diff, desiredRate, DegreesToRadians(holding_ ? Config::BeamHoldTurnDegrees : Config::BeamTurnDegrees), change, dt);
             diff_ = std::fabs(WrapAngle(desired - facing_));
             if (!holding_ && diff_ <= DegreesToRadians(Config::BeamAimedDegrees)) {
                 holding_ = true;  // 旋回を終えた
@@ -300,6 +301,8 @@ namespace {
         void HoldAfterFire() {
             omega_ = 0.0f;
             postFireHold_ = Config::BeamPostFireHoldSeconds;
+            resting_ = true;
+            ambushing_ = false;
         }
         float Facing() const { return facing_; }
         const float* FacingPtr() const { return &facing_; }
@@ -311,10 +314,73 @@ namespace {
             facing_ = WrapAngle(facing_ + omega_ * dt);
         }
 
+        // diff だけ先の方向（rate で動いている）へ向けて旋回する。
+        // ちょうど止まれる速さは、1回の処理ごとに change ずつ減速して残りの角度で止まれる速さ
+        //（v + (v−change) + … を dt 倍した距離が残りの角度になる v）。これに狙う方向が動く速さを足した速さを目指し、
+        // 角加速度の範囲で速さを変える（動く相手にも遅れずに向き続けられるように。最高の速さ maxSpeed は超えない）
+        void Turn(float diff, float rate, float maxSpeed, float change, float dt) {
+            const float sign = (diff >= 0.0f) ? 1.0f : -1.0f;
+            const float stopSpeed =
+                (dt > 0.0f) ? 0.5f * (-change + std::sqrt(change * change + 8.0f * change * std::fabs(diff) / dt)) : 0.0f;
+            const float wanted = std::max(-maxSpeed, std::min(maxSpeed, rate + sign * std::min(maxSpeed, stopSpeed)));
+            omega_ += std::max(-change, std::min(change, wanted - omega_));
+            float step = omega_ * dt;
+            if (step * diff > 0.0f && std::fabs(step) > std::fabs(diff)) {
+                step = diff;  // 行き過ぎない
+                if (dt > 0.0f) omega_ = step / dt;
+            }
+            facing_ = WrapAngle(facing_ + step);
+        }
+
+        // 止まっている状態から angle だけ向き直って止まるまでの時間（加速して、最高の速さに届けばその速さで回り、減速する）
+        static float TurnTime(float angle) {
+            const float accel = DegreesToRadians(Config::BeamTurnAccelDegrees);
+            const float vmax = DegreesToRadians(Config::BeamTurnDegrees);
+            return (angle <= vmax * vmax / accel) ? 2.0f * std::sqrt(angle / accel) : angle / vmax + vmax / accel;
+        }
+
+        // 待ち伏せ：相手が rate で動く先へ向き直って止まり、相手の狙う方向がずれ1度以内に入るのを待つ
+        void Ambush(float desired, float rate, float change, float dt) {
+            const float aimed = DegreesToRadians(Config::BeamAimedDegrees);
+            if (!ambushing_) {
+                // 向き直って止まるまでの時間に相手が進む先を、数回繰り返して詰める
+                float lead = 0.0f;
+                float angle = desired;
+                for (int i = 0; i < 4; ++i) {
+                    lead = std::min(Config::BeamAmbushMaxLeadSeconds,
+                                    TurnTime(std::fabs(WrapAngle(angle - facing_))) + Config::BeamAmbushMarginSeconds);
+                    angle = WrapAngle(desired + rate * lead);
+                }
+                ambushAngle_ = angle;
+                ambushLead_ = lead;
+                ambushWait_ = 0.0f;
+                ambushing_ = true;
+            }
+            // 固定した待ち伏せの向きへ向き直る（その向きは動かない）
+            Turn(WrapAngle(ambushAngle_ - facing_), 0.0f, DegreesToRadians(Config::BeamTurnDegrees), change, dt);
+            const float d = WrapAngle(desired - facing_);
+            diff_ = std::fabs(d);
+            const bool stopped = (omega_ == 0.0f && std::fabs(WrapAngle(ambushAngle_ - facing_)) < 1e-4f);
+            holding_ = stopped;  // 待ち伏せの向きで止まったら、相手が入った瞬間に撃てる
+            if (stopped && diff_ > aimed) {
+                ambushWait_ += dt;
+                // 相手が近づいてこない（通り過ぎた・止まった・向きを変えた）か、待ちすぎたら、計算し直す
+                const bool approaching = (d * rate < 0.0f);
+                if (!approaching || ambushWait_ > ambushLead_ + Config::BeamAmbushMaxWaitSeconds) {
+                    ambushing_ = false;
+                }
+            }
+        }
+
         float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
         float omega_ = 0.0f;         // 今の旋回の速さ（ラジアン/秒。向きの正負あり）
         float diff_ = Pi;            // 狙う方向とのずれ（ラジアン）
         float postFireHold_ = 0.0f;  // 撃った後、砲を止めておく残りの時間
+        bool resting_ = false;       // 撃った後、撃つ間隔が来るまで止まって休んでいる
+        bool ambushing_ = false;     // 待ち伏せの向きを決めて、そこへ向き直っている（止まって待っている）
+        float ambushAngle_ = 0.0f;   // 待ち伏せの向き
+        float ambushLead_ = 0.0f;    // 待ち伏せの向きを決めたときに読んだ、相手が来るまでの時間
+        float ambushWait_ = 0.0f;    // 待ち伏せの向きで止まってから待った時間
         bool hasTarget_ = false;
         bool holding_ = false;       // 旋回を終えて、低速で相手を向き続けている
         TargetKind trackedKind_ = TargetKind::None;
