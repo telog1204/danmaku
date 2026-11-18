@@ -11,7 +11,7 @@ enum class TargetKind {
 // 武装がロックオンするときの、狙う相手の優先の仕方
 enum class TargetPriority {
     Any,             // 敵本体と敵の弾を区別しない（誘導兵器）
-    LightAndBullets, // 軽の敵と敵の弾だけ（速射砲）
+    LightBulletsThenMedium, // 軽の敵と敵の弾 → 中 の順に、いる区分から選ぶ（速射砲。重は狙わない）
     MediumFirst,     // 中・重 → 軽 → 敵の弾 の順に、いる区分から選ぶ（ビーム砲）
 };
 
@@ -21,7 +21,8 @@ struct Target {
     int id = 0;
     Vec2 pos;
     Vec2 vel;
-    bool light = false;  // 軽の敵か（速射砲は、軽の敵と敵の弾だけを狙う）
+    bool light = false;  // 軽の敵か
+    bool medium = false; // 中の敵か
 
     bool SameAs(const Target& o) const { return kind != TargetKind::None && kind == o.kind && id == o.id; }
 };

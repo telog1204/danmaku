@@ -304,6 +304,7 @@ std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRang
             t.pos = e.pos;
             t.vel = e.vel;
             t.light = (e.cls == EnemyClass::Light);
+            t.medium = (e.cls == EnemyClass::Medium);
             if (!accept || accept(t)) {
                 found.emplace_back(d, t);
             }
@@ -348,8 +349,9 @@ namespace {
     std::vector<TargetFilter> PriorityTiers(TargetPriority priority) {
         const auto isBullet = [](const Target& t) { return t.kind == TargetKind::EnemyBullet; };
         switch (priority) {
-        case TargetPriority::LightAndBullets:
-            return { [isBullet](const Target& t) { return isBullet(t) || t.light; } };
+        case TargetPriority::LightBulletsThenMedium:
+            return { [isBullet](const Target& t) { return isBullet(t) || t.light; },
+                     [](const Target& t) { return t.medium; } };
         case TargetPriority::MediumFirst:
             return { [](const Target& t) { return t.kind == TargetKind::Enemy && !t.light; },
                      [](const Target& t) { return t.kind == TargetKind::Enemy && t.light; },
@@ -397,6 +399,41 @@ Target World::PickLockOnTarget(const Vec2& from, float maxRange, TargetPriority 
     return Target();
 }
 
+Target World::PickMinTurnTarget(const Vec2& from, float maxRange, TargetPriority priority, const std::vector<Target>& exclude,
+                                float facing) {
+    for (const TargetFilter& tier : PriorityTiers(priority)) {
+        const std::vector<Target> inTier = FindNearestCandidates(from, maxRange, false, static_cast<size_t>(-1), tier);
+        if (inTier.empty()) continue;
+        // 1回目は exclude の相手を外して選び、外すと候補がなくなるときは、ほかの武装と重なっても選ぶ
+        for (int pass = 0; pass < 2; ++pass) {
+            Target best;
+            float bestDiff = 0.0f;
+            for (const Target& t : inTier) {
+                if (pass == 0 && Contains(exclude, t)) continue;
+                const Vec2 to = t.pos - from;
+                const float diff = std::fabs(WrapAngle(std::atan2(to.y, to.x) - facing));
+                if (best.kind == TargetKind::None || diff < bestDiff) {
+                    best = t;
+                    bestDiff = diff;
+                }
+            }
+            if (best.kind != TargetKind::None) return best;
+        }
+    }
+    return Target();
+}
+
+bool World::AnyLightOrBullet(const Vec2& from, float maxRange) const {
+    const float r2 = maxRange * maxRange;
+    for (const Enemy& e : enemies_) {
+        if (e.alive && e.cls == EnemyClass::Light && (e.pos - from).LengthSq() <= r2) return true;
+    }
+    for (const Bullet& b : enemyBullets_) {
+        if (b.alive && (b.pos - from).LengthSq() <= r2) return true;
+    }
+    return false;
+}
+
 std::vector<Target> World::TargetsOfSameKind(const Weapon* self) const {
     std::vector<Target> targets;
     for (const auto& w : weapons_) {
@@ -418,7 +455,15 @@ namespace {
         t.pos = e.pos;
         t.vel = e.vel;
         t.light = (e.cls == EnemyClass::Light);
+        t.medium = (e.cls == EnemyClass::Medium);
         return t;
+    }
+}
+
+namespace {
+    // 決戦型が狙う順番（重 → 中 → 軽）
+    int ClassRank(const Enemy& e) {
+        return (e.cls == EnemyClass::Heavy) ? 2 : (e.cls == EnemyClass::Medium) ? 1 : 0;
     }
 }
 
@@ -437,8 +482,12 @@ Target World::FindHighestHpTarget(const Vec2& from, const std::vector<Target>& e
                 if (!e.alive || !inTier(e)) continue;
                 if (pass == 0 && Contains(exclude, TargetOf(e))) continue;
                 const float d = (e.pos - from).LengthSq();
-                // 最大HPで比べる（削られても変わらないので、一度選んだ相手を倒すまで狙い続けやすい）。同じなら近い方
-                if (best == nullptr || e.maxHp > best->maxHp || (e.maxHp == best->maxHp && d < bestDistSq)) {
+                // 重（最大HPが高い順）→ 中 → 軽 の順で比べる（最大HPは削られても変わらないので、一度選んだ相手を倒すまで
+                // 狙い続けやすい）。同じなら近い方
+                const bool better = (best == nullptr) || ClassRank(e) > ClassRank(*best) ||
+                                    (ClassRank(e) == ClassRank(*best) &&
+                                     (e.maxHp > best->maxHp || (e.maxHp == best->maxHp && d < bestDistSq)));
+                if (better) {
                     best = &e;
                     bestDistSq = d;
                 }
@@ -446,7 +495,7 @@ Target World::FindHighestHpTarget(const Vec2& from, const std::vector<Target>& e
             if (best == nullptr) continue;
             if (keep.kind == TargetKind::Enemy && keep.id != best->id) {
                 for (const Enemy& e : enemies_) {
-                    if (e.alive && e.id == keep.id && inTier(e) && e.maxHp == best->maxHp) {
+                    if (e.alive && e.id == keep.id && inTier(e) && ClassRank(e) == ClassRank(*best) && e.maxHp == best->maxHp) {
                         return TargetOf(e);  // 今狙っている相手も最も高ければ、狙い続ける
                     }
                 }
@@ -511,6 +560,8 @@ Target World::FindTargetById(TargetKind kind, int id) const {
                 t.id = id;
                 t.pos = e.pos;
                 t.vel = e.vel;
+                t.light = (e.cls == EnemyClass::Light);
+                t.medium = (e.cls == EnemyClass::Medium);
                 break;
             }
         }
@@ -538,6 +589,28 @@ bool World::FindCrowdCenter(Vec2& center) const {
         Vec2 sum;
         for (const Enemy& o : enemies_) {
             if (o.alive && (o.pos - e.pos).LengthSq() <= r2) {
+                ++count;
+                sum += o.pos;
+            }
+        }
+        if (count > bestCount) {
+            bestCount = count;
+            center = sum * (1.0f / count);
+        }
+    }
+    return bestCount > 0;
+}
+
+bool World::FindMediumCrowdCenter(Vec2& center) const {
+    // 周り（CrowdRadius 以内）にいる中の敵が最も多い中の敵を探し、その周りの中の敵の平均の位置を中心とする
+    int bestCount = 0;
+    const float r2 = Config::CrowdRadius * Config::CrowdRadius;
+    for (const Enemy& e : enemies_) {
+        if (!e.alive || e.cls != EnemyClass::Medium) continue;
+        int count = 0;
+        Vec2 sum;
+        for (const Enemy& o : enemies_) {
+            if (o.alive && o.cls == EnemyClass::Medium && (o.pos - e.pos).LengthSq() <= r2) {
                 ++count;
                 sum += o.pos;
             }
@@ -749,29 +822,24 @@ Enemy& World::SpawnEnemyAt(EnemyClass cls, EnemyType type, const Vec2& pos) {
     e.cls = cls;
     e.type = type;
     e.pos = pos;
-    // 時間が経つほどHPが増える（軽は増えない）
-    const float hpScale = 1.0f + elapsed_ / Config::EnemyHpGrowthSeconds;
+    // HPを持つのは重だけ（軽・中は、効く攻撃が当たれば1発で倒れる）
     switch (cls) {
     case EnemyClass::Light:
         e.radius = Config::LightRadius;
         e.cruiseSpeed = Config::LightSpeed;
         e.turnDegrees = Config::LightTurnDegrees;
-        e.maxHp = 1.0f;
-        e.defense = 0.0f;
         break;
     case EnemyClass::Medium:
         e.radius = Config::MediumRadius;
         e.cruiseSpeed = Config::MediumSpeed;
         e.turnDegrees = Config::MediumTurnDegrees;
-        e.maxHp = Config::MediumHp * hpScale;
-        e.defense = Config::MediumDefense;
         break;
     case EnemyClass::Heavy:
         e.radius = Config::HeavyRadius;
         e.cruiseSpeed = Config::HeavySpeed;
         e.turnDegrees = Config::HeavyTurnDegrees;
-        e.maxHp = Config::HeavyHp * hpScale;
-        e.defense = Config::HeavyDefense;
+        // 大艦隊を倒すたびにHPが増える（すでにいる重は変わらない）
+        e.maxHp = Config::HeavyHpStart + Config::HeavyHpPerGrandFleet * static_cast<float>(fleetKills_);
         break;
     }
     e.hp = e.maxHp;
@@ -1193,16 +1261,33 @@ std::vector<WeaponKind> World::WeaponCandidates() const {
     return candidates;
 }
 
-void World::DamageEnemy(Enemy& e, float damage, bool byEnemyBlast) {
+void World::DamageEnemy(Enemy& e, float damage, DamageSource source, float mediumKillChance) {
     if (!e.alive) {
         return;
     }
-    // 受けるダメージ＝攻撃力−防御力（最低でも攻撃力の1割は通る）。軽はどの攻撃でも1発で倒れる
-    const float dealt = std::max(damage * Config::MinDamageRate, damage - e.defense);
-    e.hp -= (e.cls == EnemyClass::Light) ? e.hp : dealt;
-    if (e.hp <= 0.0f) {
+    // 中・重に効くのは、ビーム・誘導弾の直撃・炸裂弾の直撃だけ（速射砲の弾・炸裂弾の破片・爆発は効かない）
+    const bool hits = (source == DamageSource::Beam || source == DamageSource::MissileHit || source == DamageSource::ShellHit);
+    bool killed = false;
+    switch (e.cls) {
+    case EnemyClass::Light:
+        killed = true;  // 軽はどの攻撃でも1発で倒れる
+        break;
+    case EnemyClass::Medium:
+        // 中は効く攻撃なら1発で倒れる。速射砲の弾は、威力強化があれば低い確率で倒す
+        killed = hits || (source == DamageSource::RapidBullet && mediumKillChance > 0.0f &&
+                          RandomRange(0.0f, 1.0f) < mediumKillChance);
+        break;
+    case EnemyClass::Heavy:
+        // 重は効く攻撃の攻撃力の分だけHPが減り、0で倒れる
+        if (hits) {
+            e.hp -= damage;
+            killed = (e.hp <= 0.0f);
+        }
+        break;
+    }
+    if (killed) {
         e.alive = false;
-        ExplodeEnemy(e, byEnemyBlast);  // 敵の爆発で倒れたときは、見た目だけの爆発（連鎖しない）
+        ExplodeEnemy(e);  // 見た目だけの爆発
         if (e.grandFlagship) {
             // 大艦隊の旗艦は落とし物を落とさず、全部倒すと報酬を選べる
             CheckGrandFleetDefeated();
@@ -1213,29 +1298,27 @@ void World::DamageEnemy(Enemy& e, float damage, bool byEnemyBlast) {
     }
 }
 
-void World::DestroyEnemyBullet(Bullet& b, bool byEnemyBlast) {
+void World::DestroyEnemyBullet(Bullet& b) {
     if (!b.alive) {
         return;
     }
-    // 自分の攻撃で壊された敵の弾は、小さな爆発を起こして、周りの敵・敵の弾・誘導弾を巻き込む（連鎖する）。
-    // 敵の爆発で壊れたときは、見た目だけの爆発にする（敵の爆発から連鎖しない）
+    // 自分の攻撃で壊された敵の弾は、小さな爆発を起こす。自分の誘導弾の爆発と同じく、周りの敵本体・敵の弾を巻き込み（連鎖する）、
+    // 自分の誘導弾は誘爆させない
     b.alive = false;
-    AddExplosion(b.pos, Config::EnemyBulletBlastRadius, Config::EnemyBulletBlastDamage, Config::EnemyBulletBlastSeconds,
-                 ExplosionSource::EnemyBullet, byEnemyBlast);
+    AddExplosion(b.pos, Config::EnemyBulletBlastRadius, Config::EnemyBulletBlastSeconds, ExplosionSource::EnemyBullet);
 }
 
-void World::ExplodeEnemy(const Enemy& e, bool harmless) {
-    // 区分ごとの大きさで爆発し、周りの敵本体・敵の弾を巻き込み、自分の誘導弾を誘爆させる（harmless なら見た目だけ）
+void World::ExplodeEnemy(const Enemy& e) {
+    // 区分ごとの大きさで爆発する（見た目だけで、何も巻き込まない）
     const float radius = (e.cls == EnemyClass::Heavy)    ? Config::HeavyBlastRadius
                          : (e.cls == EnemyClass::Medium) ? Config::MediumBlastRadius
                                                          : Config::LightBlastRadius;
-    AddExplosion(e.pos, radius, Config::EnemyBlastDamage, Config::EnemyBlastSeconds, ExplosionSource::Enemy, harmless);
+    AddExplosion(e.pos, radius, Config::EnemyBlastSeconds, ExplosionSource::Enemy);
 }
 
 bool World::HitWithBullet(Bullet& b, int targetId) {
-    // 貫徹力強化を付けた速射砲の弾は、確率で貫いて先へ進む（威力は下がる）
+    // 貫徹力強化を付けた速射砲の弾は、確率で貫いて先へ進む
     if (b.pierceChance > 0.0f && RandomRange(0.0f, 1.0f) < b.pierceChance) {
-        b.damage *= Config::RapidPierceDecay;
         b.lastHitId = targetId;
         return true;
     }
@@ -1243,13 +1326,11 @@ bool World::HitWithBullet(Bullet& b, int targetId) {
     return false;
 }
 
-void World::AddExplosion(const Vec2& pos, float radius, float damage, float seconds, ExplosionSource source, bool harmless) {
+void World::AddExplosion(const Vec2& pos, float radius, float seconds, ExplosionSource source) {
     Explosion x;
     x.pos = pos;
     x.source = source;
-    x.harmless = harmless;
     x.radius = radius;
-    x.damage = damage;
     x.life = seconds;
     x.maxLife = seconds;
     pendingExplosions_.push_back(x);
@@ -1258,14 +1339,14 @@ void World::AddExplosion(const Vec2& pos, float radius, float damage, float seco
 void World::DetonateMissile(Missile& m) {
     if (!m.alive) return;
     m.alive = false;
-    AddExplosion(m.pos, m.blastRadius, Config::MissileExplosionDamage, Config::MissileExplosionSeconds, ExplosionSource::Missile);
+    AddExplosion(m.pos, m.blastRadius, Config::MissileExplosionSeconds, ExplosionSource::Missile);
 }
 
 void World::BurstShell(Shell& s) {
     if (!s.alive) return;
     s.alive = false;
     // その場に残る大きな爆炎
-    AddExplosion(s.pos, s.flameRadius, Config::ShellFlameDamage * s.damageScale, s.flameSeconds, ExplosionSource::Shell);
+    AddExplosion(s.pos, s.flameRadius, s.flameSeconds, ExplosionSource::Shell);
     // 進んでいた方向の前方へ、円錐形に破片をまく
     const float baseAngle = std::atan2(s.vel.y, s.vel.x);
     const float spread = Config::ShellFragmentSpreadDegrees * Pi / 180.0f;
@@ -1275,14 +1356,14 @@ void World::BurstShell(Shell& s) {
         f.pos = s.pos;
         f.vel = Vec2::FromAngle(angle) * (Config::ShellFragmentSpeed * RandomRange(0.8f, 1.2f));
         f.radius = Config::FragmentRadius;
-        f.damage = Config::ShellFragmentDamage * s.damageScale;
         f.life = Config::ShellFragmentSeconds;
         playerBullets_.push_back(f);
     }
 }
 
 void World::HandleCollisions() {
-    // 速射砲の弾・破片：敵の弾とぶつかると敵の弾は消える。敵本体に当たると威力を与える。
+    // 速射砲の弾・破片：敵の弾とぶつかると敵の弾は消える。敵本体に当たると、軽は倒れる（中は速射砲の威力強化の確率でだけ倒れ、
+    // 重には効かない）。
     // 弾はふつうそこで消えるが、貫徹力強化があれば確率で貫いて先へ進む
     for (Bullet& pb : playerBullets_) {
         if (!pb.alive) continue;
@@ -1295,7 +1376,8 @@ void World::HandleCollisions() {
         if (!pb.alive) continue;
         for (Enemy& e : enemies_) {
             if (e.alive && e.id != pb.lastHitId && Overlaps(pb.pos, pb.radius, e.pos, e.radius)) {
-                DamageEnemy(e, pb.damage);
+                // 破片は life を持つ（速射砲の弾は持たない）
+                DamageEnemy(e, 0.0f, pb.life >= 0.0f ? DamageSource::Fragment : DamageSource::RapidBullet, pb.mediumKillChance);
                 if (!HitWithBullet(pb, e.id)) break;
             }
         }
@@ -1318,7 +1400,7 @@ void World::HandleCollisions() {
             const float r = e.radius + Config::BeamHalfWidth;
             if (DistanceSqToSegment(e.pos, tail, b.pos) <= r * r) {
                 b.hitIds.push_back(e.id);
-                DamageEnemy(e, b.damage);
+                DamageEnemy(e, b.damage, DamageSource::Beam);
                 b.damage *= b.decay;
             }
         }
@@ -1329,7 +1411,7 @@ void World::HandleCollisions() {
         if (!m.alive) continue;
         for (Enemy& e : enemies_) {
             if (e.alive && Overlaps(m.pos, Config::MissileRadius, e.pos, e.radius)) {
-                DamageEnemy(e, m.damage);
+                DamageEnemy(e, m.damage, DamageSource::MissileHit);
                 DetonateMissile(m);
                 break;
             }
@@ -1349,7 +1431,7 @@ void World::HandleCollisions() {
         if (!s.alive) continue;
         for (Enemy& e : enemies_) {
             if (e.alive && Overlaps(s.pos, Config::ShellRadius, e.pos, e.radius)) {
-                DamageEnemy(e, Config::ShellDirectDamage * s.damageScale);
+                DamageEnemy(e, Config::ShellDirectDamage * s.damageScale, DamageSource::ShellHit);
                 BurstShell(s);
                 break;
             }
@@ -1364,8 +1446,8 @@ void World::HandleCollisions() {
         }
     }
 
-    // 爆発・爆炎：残っているあいだ、触れた敵（1体につき1回）・敵の弾・誘導弾を巻き込む。
-    // 巻き込まれた誘導弾が起こす爆発も、同じフレームのうちに次々と広がる（誘爆）
+    // 爆発・爆炎：残っているあいだ、触れた敵本体（1体につき1回。軽だけが倒れる）・敵の弾を巻き込む。
+    // 炸裂弾の爆炎は自分の誘導弾も誘爆させ、その爆発も同じフレームのうちに広がる。敵本体が消えたときの爆発は見た目だけ
     // 残っている爆炎も毎回判定するので、新しい爆発がなくても1回は回す
     // 1回目はすべての爆発を、2回目からは新しく起きた爆発だけを判定する（連鎖が長く続いても重くならないように）
     size_t firstNew = 0;
@@ -1377,20 +1459,20 @@ void World::HandleCollisions() {
         const size_t end = explosions_.size();
         for (size_t xi = firstNew; xi < end; ++xi) {
             Explosion& x = explosions_[xi];
-            if (!x.alive || x.harmless) continue;  // 見た目だけの爆発は、何も巻き込まない
-            const bool enemyBlast = (x.source == ExplosionSource::Enemy);
+            if (!x.alive || x.source == ExplosionSource::Enemy) continue;  // 敵本体が消えたときの爆発は、何も巻き込まない
             for (Enemy& e : enemies_) {
                 if (e.alive && !Contains(x.hitIds, e.id) && Overlaps(x.pos, x.radius, e.pos, e.radius)) {
                     x.hitIds.push_back(e.id);
-                    DamageEnemy(e, x.damage, enemyBlast);
+                    DamageEnemy(e, 0.0f, DamageSource::Explosion);
                 }
             }
             for (Bullet& eb : enemyBullets_) {
                 if (eb.alive && Overlaps(x.pos, x.radius, eb.pos, eb.radius)) {
-                    DestroyEnemyBullet(eb, enemyBlast);
+                    DestroyEnemyBullet(eb);
                 }
             }
-            if (x.source == ExplosionSource::Missile) continue;  // 誘導弾の爆発では、ほかの誘導弾は誘爆しない
+            // 誘導弾を誘爆させるのは炸裂弾の爆炎だけ（誘導弾の爆発・敵の弾の爆発では誘爆しない）
+            if (x.source != ExplosionSource::Shell) continue;
             for (Missile& m : missiles_) {
                 // まっすぐ進んでいるあいだ（撃ち出した直後）は巻き込まれない
                 if (m.alive && m.age >= m.straightSeconds && Overlaps(x.pos, x.radius, m.pos, Config::MissileRadius)) {
@@ -1414,7 +1496,7 @@ void World::HandleCollisions() {
         if (e.alive && Overlaps(e.pos, e.radius, core_.pos, core_.radius)) {
             e.alive = false;
             core_.hp -= (e.type == EnemyType::Kamikaze) ? Config::KamikazeRamDamage : Config::RamDamage;
-            ExplodeEnemy(e, false);  // ぶつかった位置で爆発する（コアへの追加のダメージはない）
+            ExplodeEnemy(e);  // ぶつかった位置で爆発する（見た目だけ）
             if (e.grandFlagship) {
                 CheckGrandFleetDefeated();
             }

@@ -20,6 +20,7 @@ struct Core {
 struct Bullet {
     int id = 0;
     float smokeDistance = 0.0f;  // 敵の弾：前に煙の粒を置いてから進んだ距離
+    float mediumKillChance = 0.0f; // 速射砲の弾：中の敵に当たったときに倒す確率（威力強化）
     Vec2 pos;
     Vec2 vel;
     float radius = 0.0f;
@@ -82,7 +83,7 @@ struct Shell {
     Vec2 pos;
     Vec2 vel;
     float distanceLeft = 0.0f;  // 炸裂する位置までの残りの距離
-    float damageScale = 1.0f;   // 直撃・爆炎・破片の威力の倍率
+    float damageScale = 1.0f;   // 直撃の攻撃力の倍率（威力強化）
     float flameRadius = 0.0f;
     float flameSeconds = 0.0f;
     int fragmentCount = 0;
@@ -114,19 +115,27 @@ struct Message {
 // 爆発を起こしたもの（何を巻き込むかが変わる）
 enum class ExplosionSource {
     Missile,      // 自分の誘導弾（ほかの誘導弾は誘爆させない）
-    Shell,        // 自分の炸裂弾の爆炎
-    EnemyBullet,  // 自分の攻撃で壊した敵の弾
-    Enemy,        // 敵本体が消えたとき（この爆発で消えたものの爆発は、見た目だけになる）
+    Shell,        // 自分の炸裂弾の爆炎（自分の誘導弾も誘爆させる）
+    EnemyBullet,  // 自分の攻撃で壊した敵の弾（誘導弾の爆発と同じ扱い）
+    Enemy,        // 敵本体が消えたとき（見た目だけ）
+};
+
+// 敵に当たった攻撃の種類（区分ごとに、効くかどうかが決まる）
+enum class DamageSource {
+    RapidBullet,  // 速射砲の弾
+    Fragment,     // 炸裂弾の破片
+    Beam,         // ビーム
+    MissileHit,   // 誘導弾の直撃
+    ShellHit,     // 炸裂弾の直撃
+    Explosion,    // 爆発・爆炎
 };
 
 struct Explosion {
     Vec2 pos;
     float radius = 0.0f;
-    float damage = 0.0f;
     float life = 0.0f;
     float maxLife = 0.0f;
     ExplosionSource source = ExplosionSource::Missile;
-    bool harmless = false;  // 見た目だけ（何も巻き込まない）
     std::vector<int> hitIds;
     bool alive = true;
 };
@@ -151,7 +160,6 @@ struct Enemy {
     int id = 0;
     EnemyClass cls = EnemyClass::Medium;
     EnemyType type = EnemyType::Gunship;
-    float defense = 0.0f;      // 防御力（受けるダメージ＝攻撃力−防御力。最低でも1割は通る）
     float cruiseSpeed = 0.0f;  // ふだんの速さ
     float turnDegrees = 0.0f;  // 1秒間に曲がれる角度
     bool grandFlagship = false; // 大艦隊の旗艦（全部倒すと報酬を選べる）
@@ -160,7 +168,7 @@ struct Enemy {
     Vec2 pos;
     Vec2 vel;
     float radius = 0.0f;
-    float hp = 0.0f;
+    float hp = 0.0f;           // 重だけが持つ（軽・中は 0）
     float maxHp = 0.0f;
     bool alive = true;
     float heading = 0.0f;      // 機首の向き（ラジアン）。常にこの向きへ進む
@@ -262,6 +270,12 @@ public:
     // exclude にある相手は候補から外す（外すと候補がなくなるときは、外さずに選ぶ）。だれもいなければ kind が None
     Target PickLockOnTarget(const Vec2& from, float maxRange, TargetPriority priority, const std::vector<Target>& exclude = {},
                             const float* keepAimFacing = nullptr);
+    // priority の順に区分を見て、相手がいる最初の区分の中から、facing の向きから最も少ない旋回で狙える相手（角度の差が最も小さい
+    // 相手）を選ぶ（速射砲の近接防御型）。exclude の扱いは PickLockOnTarget と同じ。だれもいなければ kind が None
+    Target PickMinTurnTarget(const Vec2& from, float maxRange, TargetPriority priority, const std::vector<Target>& exclude,
+                             float facing);
+    // from から maxRange 以内に、軽の敵か敵の弾がいるか（速射砲が中を狙っている間に、すぐに狙い直すため）
+    bool AnyLightOrBullet(const Vec2& from, float maxRange) const;
     // self と同じ種類（派生版が同じ。連装の段階は区別しない）のほかの武装が、今狙っている相手
     std::vector<Target> TargetsOfSameKind(const Weapon* self) const;
     // 番号で相手を探す（もういなければ kind が None になる）
@@ -271,6 +285,8 @@ public:
     // 軽の敵と敵の弾が多い場所の中心（どちらもいなければ false）。速射砲の攻撃型が使う。
     // 敵の弾は数が多く重くなるので、ゲームの時間で CrowdRefreshSeconds ごとに数え直し、その間は前の結果を使う
     bool FindLightCrowdCenter(Vec2& center);
+    // 中の敵が最も多く集まっている所の中心（速射砲の攻撃型が、軽の敵も敵の弾もいないときに使う）。中がいなければ false
+    bool FindMediumCrowdCenter(Vec2& center) const;
 
     void AddPlayerBullet(const Bullet& b) { playerBullets_.push_back(b); }
     void FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, float damage);
@@ -297,17 +313,18 @@ private:
     void MakeRewardChoices();
     void AddMessage(const std::string& text, PickupKind kind);
     void HandleCollisions();
-    // byEnemyBlast：敵の爆発に巻き込まれた（倒れた敵・壊れた敵の弾の爆発は、見た目だけになる）
-    void DamageEnemy(Enemy& e, float damage, bool byEnemyBlast = false);
-    void DestroyEnemyBullet(Bullet& b, bool byEnemyBlast = false);  // 敵の弾を自分の攻撃で壊す（小さな爆発を起こす）
-    void ExplodeEnemy(const Enemy& e, bool harmless);  // 敵本体が消えるときの爆発を起こす
+    // 攻撃を当てる。軽はどの攻撃でも、中は効く攻撃（ビーム・誘導弾と炸裂弾の直撃）で1発で倒れる。重は効く攻撃の攻撃力の分だけHPが減る。
+    // mediumKillChance：速射砲の弾が中に当たったときに倒す確率（威力強化）
+    void DamageEnemy(Enemy& e, float damage, DamageSource source, float mediumKillChance = 0.0f);
+    void DestroyEnemyBullet(Bullet& b);  // 敵の弾を自分の攻撃で壊す（小さな爆発を起こす）
+    void ExplodeEnemy(const Enemy& e);   // 敵本体が消えるときの爆発（見た目だけ）を起こす
     void MoveEnemyBullets(float dt);
     void SpawnGroupAtEdge(EnemyClass cls, const std::vector<EnemyType>& types);
     Vec2 RandomEdgePoint(Vec2& outward);
     void CheckGrandFleetDefeated();
     void DetonateMissile(Missile& m);
     void BurstShell(Shell& s);
-    void AddExplosion(const Vec2& pos, float radius, float damage, float seconds, ExplosionSource source, bool harmless = false);
+    void AddExplosion(const Vec2& pos, float radius, float seconds, ExplosionSource source);
     void AddSmoke(const Vec2& pos, bool enemy);  // 煙の粒を置く（上限を超える間は置かない）
     void AgeEffects(float dt);                   // マズルフラッシュと煙の粒の時間を進め、消えたものを除く
     bool HitWithBullet(Bullet& b, int targetId);  // 速射砲の弾が当たったとき。貫いて進むなら true
