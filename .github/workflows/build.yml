@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [x64, Win32]
+        platform: [x64]   # 64ビットだけビルドする（32ビット用の分岐は、戻すときのために残す）
     defaults:
       run:
         shell: pwsh
