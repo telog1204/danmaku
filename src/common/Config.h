@@ -170,6 +170,7 @@ namespace Config {
 
     // 敵の動き（航空機のような動き）。常に機首の向きへ進み、向きと速さは少しずつしか変えられない
     constexpr float EnemyAcceleration = 160.0f;    // 速さを変えられる量（ドット/秒を1秒あたり）
+    constexpr float EnemyPreEntryLimit = 120.0f;  // まだフィールドに入っていない敵が、フィールドの外へこれ以上離れたら内側へ戻る
     constexpr float EnemyEdgeMargin = 120.0f;     // フィールドの端からこの距離に入ったら、旋回して内側へ戻る
 
     // 敵の区分（軽・中・重）。受けるダメージ＝攻撃力−防御力（最低でも攻撃力のこの割合は通る）
