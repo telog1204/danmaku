@@ -995,10 +995,9 @@ void World::MoveShells(float dt) {
         const Vec2 step = s.vel * dt;
         s.pos += step;
         s.distanceLeft -= step.Length();
-        if (s.distanceLeft <= 0.0f) {
+        // 決めた距離まで飛んだとき、またはフィールドの外へ出るときは、その場で炸裂する（撃った炸裂弾は必ず炸裂する）
+        if (s.distanceLeft <= 0.0f || IsFarOutside(s.pos)) {
             BurstShell(s);
-        } else if (IsFarOutside(s.pos)) {
-            s.alive = false;
         }
     }
 }

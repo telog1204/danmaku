@@ -114,7 +114,6 @@ namespace Config {
     constexpr float MissileCloseRange = 360.0f;      // 誘導兵器 近接防御型：この距離に来たものだけを撃つ
     constexpr int MissileAttackEnergy = 20;
     constexpr int MissileCloseEnergy = 20;
-    constexpr float ShellDecisiveRange = 4000.0f;    // 炸裂弾 決戦型：直撃を狙うので、途中で炸裂しない距離にする
     constexpr int ShellDecisiveEnergy = 30;
 
     // 連装型
@@ -171,6 +170,7 @@ namespace Config {
 
     // 敵の動き（航空機のような動き）。常に機首の向きへ進み、向きと速さは少しずつしか変えられない
     constexpr float EnemyAcceleration = 160.0f;    // 速さを変えられる量（ドット/秒を1秒あたり）
+    constexpr float EnemyPreEntryLimit = 120.0f;  // まだフィールドに入っていない敵が、フィールドの外へこれ以上離れたら内側へ戻る
     constexpr float EnemyEdgeMargin = 120.0f;     // フィールドの端からこの距離に入ったら、旋回して内側へ戻る
 
     // 敵の区分（軽・中・重）。受けるダメージ＝攻撃力−防御力（最低でも攻撃力のこの割合は通る）

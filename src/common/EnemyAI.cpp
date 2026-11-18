@@ -73,13 +73,22 @@ namespace {
         return push.Normalized();
     }
 
-    // 一度フィールドに入った敵は、端に近づいたら行きたい向きを内側へ寄せる（近いほど強く）
+    // 一度フィールドに入った敵は、端に近づいたら行きたい向きを内側へ寄せる（近いほど強く）。
+    // まだ入っていない敵も、フィールドの外へ EnemyPreEntryLimit より離れたら、内側へ寄せる（外へ遠く出ないように）
     Vec2 AvoidEdges(const Enemy& e, const Vec2& desired) {
-        if (!e.entered) {
-            return desired;
-        }
         const float m = Config::EnemyEdgeMargin;
         Vec2 inward;
+        if (!e.entered) {
+            const float l = Config::EnemyPreEntryLimit;
+            if (e.pos.x < -l) inward.x += 1.0f + (-l - e.pos.x) / m;
+            if (e.pos.x > Config::FieldWidth + l) inward.x -= 1.0f + (e.pos.x - (Config::FieldWidth + l)) / m;
+            if (e.pos.y < -l) inward.y += 1.0f + (-l - e.pos.y) / m;
+            if (e.pos.y > Config::FieldHeight + l) inward.y -= 1.0f + (e.pos.y - (Config::FieldHeight + l)) / m;
+            if (inward.LengthSq() <= 0.0f) {
+                return desired;
+            }
+            return (desired + inward * 3.0f).Normalized();
+        }
         if (e.pos.x < m) inward.x += (m - e.pos.x) / m;
         if (e.pos.x > Config::FieldWidth - m) inward.x -= (e.pos.x - (Config::FieldWidth - m)) / m;
         if (e.pos.y < m) inward.y += (m - e.pos.y) / m;
@@ -109,6 +118,10 @@ namespace {
 
     // 軽の敵：当たりそうな弾を見て、かわす向きを決める（見直すのはばらつきのある間隔ごと。たまに見落とす）
     void UpdateDodge(Enemy& e, World& world, float dt) {
+        if (!e.entered) {
+            e.dodgeDir = Vec2();  // フィールドに入るまでは避けずに、まっすぐ向かう（避けて外へ遠く出ないように）
+            return;
+        }
         e.reactionTimer -= dt;
         if (e.reactionTimer > 0.0f) {
             return;

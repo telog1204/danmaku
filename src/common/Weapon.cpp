@@ -647,7 +647,8 @@ namespace {
                 if (target.kind == TargetKind::None) return false;
                 decisiveTarget_ = target;
                 aim = LeadTarget(origin, target.pos, target.vel, Config::ShellSpeed);
-                distance = Config::ShellDecisiveRange;  // 当たるまで飛ぶ
+                // 狙った位置（先読みした位置）まで飛ぶ。途中で当たらなければ、そこで炸裂する（外れても爆炎と破片で巻き込む）
+                distance = std::max(Config::CoreRadius + 10.0f, (aim - origin).Length());
             } else {
                 if (!world.FindCrowdCenter(aim)) {
                     // 敵本体がいなければ、最も近い敵の弾のところで炸裂させる
