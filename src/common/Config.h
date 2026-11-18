@@ -128,6 +128,11 @@ namespace Config {
     constexpr float BeamBarrelLength = 48.0f;        // ビーム砲：画面に描く砲身の長さ
     constexpr float BeamVolleyGap = 0.05f;           // ビーム砲：一斉射で1門ずつずらす時間（秒）
     constexpr float MissileVolleyGap = 0.15f;        // 誘導兵器：一斉射で1門ずつずらす時間（秒）
+    // 誘導兵器の発射装置：コアの左右から生える四角（固定で回らない）。撃ち出す向きが右寄りなら右、左寄りなら左の装置を使い、
+    // 装置のふちに撃ち出す向きに対して左右に並べた2つの出口から、1発ごとに交互に撃ち出す（2列になる）
+    constexpr float MissileLauncherLength = 30.0f;   // 発射装置：コアの中心から先端までの長さ
+    constexpr float MissileLauncherHeight = 14.0f;   // 発射装置：高さ
+    constexpr float MissileTubeSpacing = 8.0f;       // 発射装置：2つの出口の間隔
     constexpr float ShellVolleyGap = 0.1f;           // 炸裂弾：一斉射で1門ずつずらす時間（秒）
     constexpr float ShellFanDegrees = 8.0f;          // 炸裂弾：扇形で1門ごとに向きを変える角度
 

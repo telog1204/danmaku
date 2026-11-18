@@ -48,6 +48,24 @@ namespace {
         }
     }
 
+    // 誘導兵器の発射装置：コアの左右から生える黄色の四角（固定で回らない）。誘導兵器を積んでいるときだけ、左右1つずつ描く。
+    // コアの中心から外へ伸ばして、コアの後ろに描くので、コアから生えて見える
+    void DrawMissileLaunchers(const World& world) {
+        bool hasMissile = false;
+        for (const auto& w : world.Weapons()) {
+            if (FamilyOf(w->Kind()) == WeaponFamily::Missile) {
+                hasMissile = true;
+                break;
+            }
+        }
+        if (!hasMissile) return;
+        const Vec2 c = world.GetCore().pos;
+        const float h = Config::MissileLauncherHeight * 0.5f;
+        const unsigned int color = GetColor(255, 230, 90);
+        DrawBox(Px(c.x - Config::MissileLauncherLength), Px(c.y - h), Px(c.x), Px(c.y + h), color, TRUE);
+        DrawBox(Px(c.x), Px(c.y - h), Px(c.x + Config::MissileLauncherLength), Px(c.y + h), color, TRUE);
+    }
+
     // 機首の向きを指す三角（大きさ size、色 c）
     void DrawArrow(const Enemy& e, float size, unsigned int c) {
         const Vec2 f = Vec2::FromAngle(e.heading);
@@ -220,8 +238,9 @@ namespace {
 }
 
 void DrawWorld(const World& world) {
-    // 砲身はコアの後ろに、色がそのまま見えるように描く（ビーム砲の上に速射砲を重ねる）
+    // 誘導兵器の発射装置と砲身はコアの後ろに、色がそのまま見えるように描く（発射装置の上にビーム砲、その上に速射砲を重ねる）
     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+    DrawMissileLaunchers(world);
     DrawBarrels(world, false);
     DrawBarrels(world, true);
     DrawCore(world.GetCore());

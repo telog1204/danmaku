@@ -670,7 +670,15 @@ namespace {
                 // 撃ち出す向きだけを決める。狙う相手は、誘導弾がまっすぐ進み終えたあと（近接防御型はすぐに）自分で選ぶ
                 Missile m;
                 m.heading = baseHeading;
-                m.pos = origin + Vec2::FromAngle(m.heading) * Config::CoreRadius;
+                // 撃ち出す向きが右寄り（真上・真下を含む）なら右、左寄りなら左の発射装置から出る。
+                // 出る位置は、装置のコアの外に見えている部分の中心から撃ち出す向きへ高さの半分進んだところ（装置のふちのあたり）で、
+                // 撃ち出す向きに対して左右に並べた2つの出口を、1発ごとに交互に使う
+                const Vec2 dir = Vec2::FromAngle(m.heading);
+                const float side = (dir.x >= -1e-6f) ? 1.0f : -1.0f;
+                const Vec2 launcher = origin + Vec2(side * (Config::CoreRadius + Config::MissileLauncherLength) * 0.5f, 0.0f);
+                const float tube = nextTube_ ? 0.5f : -0.5f;
+                nextTube_ = !nextTube_;
+                m.pos = launcher + dir * (Config::MissileLauncherHeight * 0.5f) + dir.Perpendicular() * (tube * Config::MissileTubeSpacing);
                 m.straightSeconds = (Kind().variant == WeaponVariant::MissileClose) ? 0.0f : Config::MissileStraightSeconds;
                 m.damage = Config::MissileDamage * PowerScale(Config::PartPowerRate);
                 m.turnDegrees = Config::MissileTurnDegrees *
@@ -681,6 +689,7 @@ namespace {
         }
 
         float volleyHeading_ = 0.0f;  // 一斉射の向き（最初の1門を撃ち出した向き）
+        bool nextTube_ = false;       // 次に使う出口（false：撃ち出す向きの右手側、true：左手側。1発ごとに替える）
 
         LockOn lock_;  // ロックオンしている相手
 
