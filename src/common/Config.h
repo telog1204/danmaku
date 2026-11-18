@@ -247,6 +247,14 @@ namespace Config {
     constexpr float EnemyBulletBlastDamage = 1.0f;
     constexpr float EnemyBulletBlastSeconds = 0.12f;
 
+    // 敵本体が消えるとき（倒れたとき・コアに体当たりしたとき）の爆発。周りの敵本体・敵の弾を巻き込み、自分の誘導弾を誘爆させる。
+    // この爆発で倒れた敵・壊れた敵の弾の爆発は見た目だけ（何も巻き込まない）にして、敵の爆発同士では連鎖しない
+    constexpr float LightBlastRadius = 20.0f;   // 軽の爆発の半径
+    constexpr float MediumBlastRadius = 30.0f;  // 中の爆発の半径
+    constexpr float HeavyBlastRadius = 45.0f;   // 重の爆発の半径
+    constexpr float EnemyBlastDamage = 1.0f;
+    constexpr float EnemyBlastSeconds = 0.2f;
+
     // 現れ方。軽の群れと中の割合、中が艦隊になる確率は、最初の値から RampSeconds 秒かけて後の値へ変わる
     constexpr float RampSeconds = 120.0f;
     constexpr float LightGroupWeightStart = 6.0f;

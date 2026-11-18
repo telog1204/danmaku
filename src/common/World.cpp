@@ -1119,7 +1119,7 @@ std::vector<WeaponKind> World::WeaponCandidates() const {
     return candidates;
 }
 
-void World::DamageEnemy(Enemy& e, float damage) {
+void World::DamageEnemy(Enemy& e, float damage, bool byEnemyBlast) {
     if (!e.alive) {
         return;
     }
@@ -1128,6 +1128,7 @@ void World::DamageEnemy(Enemy& e, float damage) {
     e.hp -= (e.cls == EnemyClass::Light) ? e.hp : dealt;
     if (e.hp <= 0.0f) {
         e.alive = false;
+        ExplodeEnemy(e, byEnemyBlast);  // 敵の爆発で倒れたときは、見た目だけの爆発（連鎖しない）
         if (e.grandFlagship) {
             // 大艦隊の旗艦は落とし物を落とさず、全部倒すと報酬を選べる
             CheckGrandFleetDefeated();
@@ -1138,13 +1139,23 @@ void World::DamageEnemy(Enemy& e, float damage) {
     }
 }
 
-void World::DestroyEnemyBullet(Bullet& b) {
+void World::DestroyEnemyBullet(Bullet& b, bool byEnemyBlast) {
     if (!b.alive) {
         return;
     }
-    // 自分の攻撃で壊された敵の弾は、小さな爆発を起こして、周りの敵・敵の弾・誘導弾を巻き込む（連鎖する）
+    // 自分の攻撃で壊された敵の弾は、小さな爆発を起こして、周りの敵・敵の弾・誘導弾を巻き込む（連鎖する）。
+    // 敵の爆発で壊れたときは、見た目だけの爆発にする（敵の爆発から連鎖しない）
     b.alive = false;
-    AddExplosion(b.pos, Config::EnemyBulletBlastRadius, Config::EnemyBulletBlastDamage, Config::EnemyBulletBlastSeconds);
+    AddExplosion(b.pos, Config::EnemyBulletBlastRadius, Config::EnemyBulletBlastDamage, Config::EnemyBulletBlastSeconds,
+                 ExplosionSource::EnemyBullet, byEnemyBlast);
+}
+
+void World::ExplodeEnemy(const Enemy& e, bool harmless) {
+    // 区分ごとの大きさで爆発し、周りの敵本体・敵の弾を巻き込み、自分の誘導弾を誘爆させる（harmless なら見た目だけ）
+    const float radius = (e.cls == EnemyClass::Heavy)    ? Config::HeavyBlastRadius
+                         : (e.cls == EnemyClass::Medium) ? Config::MediumBlastRadius
+                                                         : Config::LightBlastRadius;
+    AddExplosion(e.pos, radius, Config::EnemyBlastDamage, Config::EnemyBlastSeconds, ExplosionSource::Enemy, harmless);
 }
 
 bool World::HitWithBullet(Bullet& b, int targetId) {
@@ -1158,9 +1169,11 @@ bool World::HitWithBullet(Bullet& b, int targetId) {
     return false;
 }
 
-void World::AddExplosion(const Vec2& pos, float radius, float damage, float seconds) {
+void World::AddExplosion(const Vec2& pos, float radius, float damage, float seconds, ExplosionSource source, bool harmless) {
     Explosion x;
     x.pos = pos;
+    x.source = source;
+    x.harmless = harmless;
     x.radius = radius;
     x.damage = damage;
     x.life = seconds;
@@ -1171,14 +1184,14 @@ void World::AddExplosion(const Vec2& pos, float radius, float damage, float seco
 void World::DetonateMissile(Missile& m) {
     if (!m.alive) return;
     m.alive = false;
-    AddExplosion(m.pos, m.blastRadius, Config::MissileExplosionDamage, Config::MissileExplosionSeconds);
+    AddExplosion(m.pos, m.blastRadius, Config::MissileExplosionDamage, Config::MissileExplosionSeconds, ExplosionSource::Missile);
 }
 
 void World::BurstShell(Shell& s) {
     if (!s.alive) return;
     s.alive = false;
     // その場に残る大きな爆炎
-    AddExplosion(s.pos, s.flameRadius, Config::ShellFlameDamage * s.damageScale, s.flameSeconds);
+    AddExplosion(s.pos, s.flameRadius, Config::ShellFlameDamage * s.damageScale, s.flameSeconds, ExplosionSource::Shell);
     // 進んでいた方向の前方へ、円錐形に破片をまく
     const float baseAngle = std::atan2(s.vel.y, s.vel.x);
     const float spread = Config::ShellFragmentSpreadDegrees * Pi / 180.0f;
@@ -1290,18 +1303,20 @@ void World::HandleCollisions() {
         const size_t end = explosions_.size();
         for (size_t xi = firstNew; xi < end; ++xi) {
             Explosion& x = explosions_[xi];
-            if (!x.alive) continue;
+            if (!x.alive || x.harmless) continue;  // 見た目だけの爆発は、何も巻き込まない
+            const bool enemyBlast = (x.source == ExplosionSource::Enemy);
             for (Enemy& e : enemies_) {
                 if (e.alive && !Contains(x.hitIds, e.id) && Overlaps(x.pos, x.radius, e.pos, e.radius)) {
                     x.hitIds.push_back(e.id);
-                    DamageEnemy(e, x.damage);
+                    DamageEnemy(e, x.damage, enemyBlast);
                 }
             }
             for (Bullet& eb : enemyBullets_) {
                 if (eb.alive && Overlaps(x.pos, x.radius, eb.pos, eb.radius)) {
-                    DestroyEnemyBullet(eb);
+                    DestroyEnemyBullet(eb, enemyBlast);
                 }
             }
+            if (x.source == ExplosionSource::Missile) continue;  // 誘導弾の爆発では、ほかの誘導弾は誘爆しない
             for (Missile& m : missiles_) {
                 // まっすぐ進んでいるあいだ（撃ち出した直後）は巻き込まれない
                 if (m.alive && m.age >= m.straightSeconds && Overlaps(x.pos, x.radius, m.pos, Config::MissileRadius)) {
@@ -1325,6 +1340,7 @@ void World::HandleCollisions() {
         if (e.alive && Overlaps(e.pos, e.radius, core_.pos, core_.radius)) {
             e.alive = false;
             core_.hp -= (e.type == EnemyType::Kamikaze) ? Config::KamikazeRamDamage : Config::RamDamage;
+            ExplodeEnemy(e, false);  // ぶつかった位置で爆発する（コアへの追加のダメージはない）
             if (e.grandFlagship) {
                 CheckGrandFleetDefeated();
             }

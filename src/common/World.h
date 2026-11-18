@@ -93,12 +93,22 @@ struct Message {
 };
 
 // 爆発・爆炎。残っているあいだ、触れた敵（1体につき1回）・敵の弾・誘導弾を巻き込む
+// 爆発を起こしたもの（何を巻き込むかが変わる）
+enum class ExplosionSource {
+    Missile,      // 自分の誘導弾（ほかの誘導弾は誘爆させない）
+    Shell,        // 自分の炸裂弾の爆炎
+    EnemyBullet,  // 自分の攻撃で壊した敵の弾
+    Enemy,        // 敵本体が消えたとき（この爆発で消えたものの爆発は、見た目だけになる）
+};
+
 struct Explosion {
     Vec2 pos;
     float radius = 0.0f;
     float damage = 0.0f;
     float life = 0.0f;
     float maxLife = 0.0f;
+    ExplosionSource source = ExplosionSource::Missile;
+    bool harmless = false;  // 見た目だけ（何も巻き込まない）
     std::vector<int> hitIds;
     bool alive = true;
 };
@@ -266,15 +276,17 @@ private:
     void MakeRewardChoices();
     void AddMessage(const std::string& text, PickupKind kind);
     void HandleCollisions();
-    void DamageEnemy(Enemy& e, float damage);
-    void DestroyEnemyBullet(Bullet& b);  // 敵の弾を自分の攻撃で壊す（小さな爆発を起こす）
+    // byEnemyBlast：敵の爆発に巻き込まれた（倒れた敵・壊れた敵の弾の爆発は、見た目だけになる）
+    void DamageEnemy(Enemy& e, float damage, bool byEnemyBlast = false);
+    void DestroyEnemyBullet(Bullet& b, bool byEnemyBlast = false);  // 敵の弾を自分の攻撃で壊す（小さな爆発を起こす）
+    void ExplodeEnemy(const Enemy& e, bool harmless);  // 敵本体が消えるときの爆発を起こす
     void MoveEnemyBullets(float dt);
     void SpawnGroupAtEdge(EnemyClass cls, const std::vector<EnemyType>& types);
     Vec2 RandomEdgePoint(Vec2& outward);
     void CheckGrandFleetDefeated();
     void DetonateMissile(Missile& m);
     void BurstShell(Shell& s);
-    void AddExplosion(const Vec2& pos, float radius, float damage, float seconds);
+    void AddExplosion(const Vec2& pos, float radius, float damage, float seconds, ExplosionSource source, bool harmless = false);
     bool HitWithBullet(Bullet& b, int targetId);  // 速射砲の弾が当たったとき。貫いて進むなら true
     void RemoveDead();
 
