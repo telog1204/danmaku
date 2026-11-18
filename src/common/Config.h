@@ -114,7 +114,6 @@ namespace Config {
     constexpr float MissileCloseRange = 360.0f;      // 誘導兵器 近接防御型：この距離に来たものだけを撃つ
     constexpr int MissileAttackEnergy = 20;
     constexpr int MissileCloseEnergy = 20;
-    constexpr float ShellDecisiveRange = 4000.0f;    // 炸裂弾 決戦型：直撃を狙うので、途中で炸裂しない距離にする
     constexpr int ShellDecisiveEnergy = 30;
 
     // 連装型
