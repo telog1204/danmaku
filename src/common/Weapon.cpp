@@ -75,6 +75,20 @@ namespace {
             return t;
         }
 
+        // 今の相手を外して、選び直す（狙っていた相手がいなくなったときと同じく、keepAimFacing の向きに近い相手を優先する）
+        Target Reselect(World& world, const Weapon* self, const Vec2& from, float maxRange, TargetPriority priority,
+                        const float* keepAimFacing) {
+            const Target t = world.PickLockOnTarget(from, maxRange, priority, world.TargetsOfSameKind(self), keepAimFacing);
+            Set(t);
+            return t;
+        }
+
+        // ロックオンする相手を決める
+        void Set(const Target& t) {
+            kind_ = t.kind;
+            id_ = t.id;
+        }
+
         // 今ロックオンしている相手（位置は入っていない）
         Target Current() const {
             Target t;
@@ -165,9 +179,8 @@ namespace {
     public:
         Turret(float turnDegrees, float fastTurnDegrees) : turnDegrees_(turnDegrees), fastTurnDegrees_(fastTurnDegrees) {}
 
-        // 毎回呼ぶ。hasTarget：狙うものがいるか、desired：狙う方向、tracked：狙っている相手（特定の相手でなければ None）。
-        // snapOnEngage：待っている状態から狙うものが現れた瞬間に、すぐそちらを向く（速射砲の近接防御型）
-        void Update(World& world, bool hasTarget, float desired, const Target& tracked, bool snapOnEngage, float dt) {
+        // 毎回呼ぶ。hasTarget：狙うものがいるか、desired：狙う方向、tracked：狙っている相手（特定の相手でなければ None）
+        void Update(World& world, bool hasTarget, float desired, const Target& tracked, float dt) {
             hasTarget_ = hasTarget;
             // 狙っていた相手がいなくなったかを見る（次の相手を狙うときの旋回の仕方を決めるため）
             if (trackedKind_ != TargetKind::None && (tracked.kind != trackedKind_ || tracked.id != trackedId_) &&
@@ -177,14 +190,6 @@ namespace {
             trackedKind_ = tracked.kind;
             trackedId_ = tracked.id;
 
-            if (snapOnEngage) {
-                if (hasTarget && !engaged_) {
-                    facing_ = desired;
-                    lostTarget_ = false;
-                    fastTurning_ = false;
-                }
-                engaged_ = hasTarget;
-            }
             if (!hasTarget) {
                 return;  // 狙うものがいなければ、向きはそのまま
             }
@@ -202,6 +207,9 @@ namespace {
             }
         }
 
+        // 狙っていた相手がまだいるのに、別の相手へ替えたときに呼ぶ（いなくなったときと同じく、角度の差が大きければ速く向き直る）
+        void ForceRetarget() { lostTarget_ = true; }
+
         // 撃ってよいか（狙うものがいて、速く旋回している最中でない）
         bool CanFire() const { return hasTarget_ && !fastTurning_; }
         float Facing() const { return facing_; }
@@ -212,7 +220,6 @@ namespace {
         float fastTurnDegrees_;
         float facing_ = -Pi * 0.5f;  // 今向いている方向（積んだばかりのときは上向き）
         bool hasTarget_ = false;     // 今、狙うものがいるか
-        bool engaged_ = false;       // snapOnEngage のとき：撃ち続けているか
         TargetKind trackedKind_ = TargetKind::None;  // 前の回に狙っていた相手
         int trackedId_ = 0;
         bool lostTarget_ = false;    // 狙っていた相手がいなくなった
@@ -404,7 +411,8 @@ namespace {
                           (kind.variant == WeaponVariant::RapidClose ? Config::RapidCloseInterval : Config::RapidGunInterval) /
                               static_cast<float>(kind.barrels),
                           firstDelay),
-              turret_(Config::RapidTurnDegrees, Config::RapidFastTurnDegrees) {}
+              turret_(kind.variant == WeaponVariant::RapidClose ? Config::RapidCloseTurnDegrees : Config::RapidTurnDegrees,
+                      kind.variant == WeaponVariant::RapidClose ? Config::RapidCloseFastTurnDegrees : Config::RapidFastTurnDegrees) {}
 
         bool HasTurret() const override { return true; }
         // 攻撃型は特定の相手を狙わない
@@ -432,8 +440,7 @@ namespace {
             float desired = 0.0f;
             Target tracked;
             const bool hasTarget = DesiredAngle(world, desired, tracked);
-            // 近接防御型：ふだんは待ち、射程内に何か入った瞬間にそちらへ向き直って撃ち始める
-            turret_.Update(world, hasTarget, desired, tracked, Kind().variant == WeaponVariant::RapidClose, dt);
+            turret_.Update(world, hasTarget, desired, tracked, dt);
         }
 
         // 弾は、狙う方向ではなく今向いている方向へ出る（旋回中も撃ち続ける）
@@ -458,8 +465,9 @@ namespace {
                     side * BarrelOffset(mount, mounts, Config::RapidBarrelSpacing);
             b.vel = dir * Config::RapidGunBulletSpeed;
             b.radius = Config::PlayerBulletRadius;
-            // 威力強化：中の敵に当たったときに、低い確率で倒す（重には効かない）
-            b.mediumKillChance = Config::RapidMediumKillChancePerPart * static_cast<float>(CountPart(PartKind::Power));
+            // 中の敵に当たったときに、低い確率で倒す（威力強化を付けるほど上がる。重には効かない）
+            b.mediumKillChance = Config::RapidMediumKillChanceBase +
+                                 Config::RapidMediumKillChancePerPart * static_cast<float>(CountPart(PartKind::Power));
             b.pierceChance = std::min(1.0f, Config::RapidPierceChancePerPart * static_cast<float>(CountPart(PartKind::Pierce)));
             world.AddPlayerBullet(b);
             world.AddMuzzleFlash(b.pos, WeaponFamily::RapidGun);
@@ -468,43 +476,71 @@ namespace {
 
     private:
         // 狙う方向を求める。狙うものがいなければ false。
-        // tracked には狙っている相手を入れる（攻撃型のように特定の相手を狙わないときは None のまま）
+        // tracked には狙っている相手を入れる（攻撃型のように特定の相手を狙わないときは None のまま）。
+        // どの派生版も、軽の敵と敵の弾を狙い、それがいなければ中の敵を狙う（重は狙わない）。
+        // 中を狙っている間に軽の敵か敵の弾が現れたら、すぐにそちらへ狙い直す
         bool DesiredAngle(World& world, float& angle, Target& tracked) {
             const Vec2 origin = world.GetCore().pos;
             switch (Kind().variant) {
-            case WeaponVariant::RapidBarrage:
             case WeaponVariant::RapidAttack: {
-                // 中心の向き（弾幕型は軽の敵と敵の弾の近い順3つからロックオンした相手、攻撃型は軽の敵と敵の弾が多い方向）を中心に、
-                // 扇形に滑らかに往復する。軽の敵も敵の弾もいなければ撃たない
+                // 攻撃型：軽の敵と敵の弾が多い方向（いなければ中の敵が多い方向）を中心に、扇形に滑らかに往復する
                 Vec2 center;
-                if (Kind().variant == WeaponVariant::RapidAttack) {
-                    if (!world.FindLightCrowdCenter(center)) return false;
-                } else {
-                    const Target target = lock_.Get(world, this, origin, NoRange, TargetPriority::LightAndBullets, turret_.FacingPtr());
-                    if (target.kind == TargetKind::None) return false;
-                    center = target.pos;
-                    tracked = target;
-                }
+                if (!world.FindLightCrowdCenter(center) && !world.FindMediumCrowdCenter(center)) return false;
                 angle = AngleOf(center - origin) + std::sin(sweepAngle_) * DegreesToRadians(Config::RapidSweepDegrees);
                 return true;
             }
             case WeaponVariant::RapidClose: {
-                // 近接防御型：軽の敵と敵の弾だけを、射程内の近い順3つからロックオンし、先読みで狙う
-                const Target target = lock_.Get(world, this, origin, Config::RapidCloseRange, TargetPriority::LightAndBullets, turret_.FacingPtr());
+                const Target target = PickCloseTarget(world, origin);
                 if (target.kind == TargetKind::None) return false;
                 tracked = target;
                 angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
                 return true;
             }
             default: {
-                // 基本型：軽の敵と敵の弾だけを、近い順3つからロックオンし、先読みで狙う
-                const Target target = lock_.Get(world, this, origin, NoRange, TargetPriority::LightAndBullets, turret_.FacingPtr());
+                // 基本型・弾幕型：近い順3つからロックオンする
+                Target target = lock_.Get(world, this, origin, NoRange, TargetPriority::LightBulletsThenMedium, turret_.FacingPtr());
+                if (target.medium && world.AnyLightOrBullet(origin, NoRange)) {
+                    // 中を狙っている間に軽の敵か敵の弾が現れた：すぐに狙い直す
+                    target = lock_.Reselect(world, this, origin, NoRange, TargetPriority::LightBulletsThenMedium, turret_.FacingPtr());
+                    turret_.ForceRetarget();
+                }
                 if (target.kind == TargetKind::None) return false;
                 tracked = target;
-                angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
+                if (Kind().variant == WeaponVariant::RapidBarrage) {
+                    // 弾幕型：ロックオンした相手の方向を中心に、扇形に滑らかに往復する
+                    angle = AngleOf(target.pos - origin) + std::sin(sweepAngle_) * DegreesToRadians(Config::RapidSweepDegrees);
+                } else {
+                    angle = AngleOf(LeadTarget(origin, target.pos, target.vel, Config::RapidGunBulletSpeed) - origin);
+                }
                 return true;
             }
             }
+        }
+
+        // 近接防御型の狙う相手：射程の中で、今の向きから最も少ない旋回で狙える相手（軽の敵・敵の弾 → 中の順）を選ぶ。
+        // 狙った相手が射程の外へ出ても狙い続けるが、射程の中に別の相手がいればそちらへ替える。
+        // 射程の中にいる間は替えない（中を狙っている間に、射程の中に軽の敵か敵の弾が入ったときは替える）
+        Target PickCloseTarget(World& world, const Vec2& origin) {
+            const float range = Config::RapidCloseRange;
+            const Target current = (lock_.Current().kind != TargetKind::None)
+                                       ? world.FindTargetById(lock_.Current().kind, lock_.Current().id)
+                                       : Target();
+            const bool inRange = current.kind != TargetKind::None && (current.pos - origin).LengthSq() <= range * range;
+            const bool needPick = current.kind == TargetKind::None || !inRange ||
+                                  (current.medium && world.AnyLightOrBullet(origin, range));
+            if (!needPick) return current;
+            const Target picked = world.PickMinTurnTarget(origin, range, TargetPriority::LightBulletsThenMedium,
+                                                          world.TargetsOfSameKind(this), turret_.Facing());
+            if (picked.kind == TargetKind::None) {
+                // 射程の中にだれもいない：外へ出た相手を狙い続ける（いなくなっていれば撃たずに待つ）
+                lock_.Set(current);
+                return current;
+            }
+            if (current.kind != TargetKind::None && !picked.SameAs(current)) {
+                turret_.ForceRetarget();  // まだいる相手から替えた（角度の差が大きければ、速く向き直る）
+            }
+            lock_.Set(picked);
+            return picked;
         }
 
         LockOn lock_;

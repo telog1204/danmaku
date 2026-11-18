@@ -102,7 +102,9 @@ namespace Config {
     constexpr float RapidSweepPeriodMin = 0.8f;      // 1往復の時間（秒）。速射砲ごとにこの範囲でランダムに決め、全体で揃わないようにする
     constexpr float RapidSweepPeriodMax = 1.2f;
     constexpr float RapidCloseInterval = 0.05f;      // 速射砲 近接防御型：撃つ間隔
-    constexpr float RapidCloseRange = 300.0f;        // 速射砲 近接防御型：この距離に何か入ったら撃ち始め、いなくなったらやめる
+    constexpr float RapidCloseRange = 300.0f;        // 速射砲 近接防御型：この距離（射程）に入った相手を狙う（狙った相手が外へ出ても狙い続ける）
+    constexpr float RapidCloseTurnDegrees = 360.0f;     // 速射砲 近接防御型：旋回の速さ（ほかの速射砲の2倍）
+    constexpr float RapidCloseFastTurnDegrees = 720.0f; // 速射砲 近接防御型：相手が替わって大きく向き直るときの旋回の速さ
     constexpr int RapidBarrageEnergy = 10;
     constexpr int RapidAttackEnergy = 10;
     constexpr int RapidCloseEnergy = 20;
@@ -144,7 +146,8 @@ namespace Config {
     // 強化パーツの効果（1個あたり）
     constexpr float PartPowerRate = 0.5f;          // 威力強化：攻撃力が元の値のこの割合ずつ増える（ビーム砲・誘導兵器）
     constexpr float ShellPartPowerRate = 0.3f;     // 威力強化（炸裂弾）：直撃の攻撃力
-    constexpr float RapidMediumKillChancePerPart = 0.02f; // 威力強化（速射砲）：弾が中の敵に当たったときに倒す確率（重には効かない）
+    constexpr float RapidMediumKillChanceBase = 0.01f;    // 速射砲の弾が中の敵に当たったときに倒す確率（重には効かない）
+    constexpr float RapidMediumKillChancePerPart = 0.02f; // 威力強化（速射砲）：中の敵を倒す確率が、1個につき増える量
     constexpr float PartRateMultiplier = 0.8f;     // 連射強化：撃つ間隔がこの倍率ずつ短くなる
     constexpr float RapidFocusMultiplier = 0.5f;   // 収束：ばらつきがこの倍率ずつ小さくなる
     constexpr float RapidPierceChancePerPart = 0.25f; // 貫徹力強化（速射砲）：当たったときに貫く確率

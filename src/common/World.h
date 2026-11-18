@@ -270,6 +270,12 @@ public:
     // exclude にある相手は候補から外す（外すと候補がなくなるときは、外さずに選ぶ）。だれもいなければ kind が None
     Target PickLockOnTarget(const Vec2& from, float maxRange, TargetPriority priority, const std::vector<Target>& exclude = {},
                             const float* keepAimFacing = nullptr);
+    // priority の順に区分を見て、相手がいる最初の区分の中から、facing の向きから最も少ない旋回で狙える相手（角度の差が最も小さい
+    // 相手）を選ぶ（速射砲の近接防御型）。exclude の扱いは PickLockOnTarget と同じ。だれもいなければ kind が None
+    Target PickMinTurnTarget(const Vec2& from, float maxRange, TargetPriority priority, const std::vector<Target>& exclude,
+                             float facing);
+    // from から maxRange 以内に、軽の敵か敵の弾がいるか（速射砲が中を狙っている間に、すぐに狙い直すため）
+    bool AnyLightOrBullet(const Vec2& from, float maxRange) const;
     // self と同じ種類（派生版が同じ。連装の段階は区別しない）のほかの武装が、今狙っている相手
     std::vector<Target> TargetsOfSameKind(const Weapon* self) const;
     // 番号で相手を探す（もういなければ kind が None になる）
@@ -279,6 +285,8 @@ public:
     // 軽の敵と敵の弾が多い場所の中心（どちらもいなければ false）。速射砲の攻撃型が使う。
     // 敵の弾は数が多く重くなるので、ゲームの時間で CrowdRefreshSeconds ごとに数え直し、その間は前の結果を使う
     bool FindLightCrowdCenter(Vec2& center);
+    // 中の敵が最も多く集まっている所の中心（速射砲の攻撃型が、軽の敵も敵の弾もいないときに使う）。中がいなければ false
+    bool FindMediumCrowdCenter(Vec2& center) const;
 
     void AddPlayerBullet(const Bullet& b) { playerBullets_.push_back(b); }
     void FireEnemyBullet(const Vec2& pos, const Vec2& vel, float radius, float damage);

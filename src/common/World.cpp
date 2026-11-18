@@ -304,6 +304,7 @@ std::vector<Target> World::FindNearestCandidates(const Vec2& from, float maxRang
             t.pos = e.pos;
             t.vel = e.vel;
             t.light = (e.cls == EnemyClass::Light);
+            t.medium = (e.cls == EnemyClass::Medium);
             if (!accept || accept(t)) {
                 found.emplace_back(d, t);
             }
@@ -348,8 +349,9 @@ namespace {
     std::vector<TargetFilter> PriorityTiers(TargetPriority priority) {
         const auto isBullet = [](const Target& t) { return t.kind == TargetKind::EnemyBullet; };
         switch (priority) {
-        case TargetPriority::LightAndBullets:
-            return { [isBullet](const Target& t) { return isBullet(t) || t.light; } };
+        case TargetPriority::LightBulletsThenMedium:
+            return { [isBullet](const Target& t) { return isBullet(t) || t.light; },
+                     [](const Target& t) { return t.medium; } };
         case TargetPriority::MediumFirst:
             return { [](const Target& t) { return t.kind == TargetKind::Enemy && !t.light; },
                      [](const Target& t) { return t.kind == TargetKind::Enemy && t.light; },
@@ -397,6 +399,41 @@ Target World::PickLockOnTarget(const Vec2& from, float maxRange, TargetPriority 
     return Target();
 }
 
+Target World::PickMinTurnTarget(const Vec2& from, float maxRange, TargetPriority priority, const std::vector<Target>& exclude,
+                                float facing) {
+    for (const TargetFilter& tier : PriorityTiers(priority)) {
+        const std::vector<Target> inTier = FindNearestCandidates(from, maxRange, false, static_cast<size_t>(-1), tier);
+        if (inTier.empty()) continue;
+        // 1回目は exclude の相手を外して選び、外すと候補がなくなるときは、ほかの武装と重なっても選ぶ
+        for (int pass = 0; pass < 2; ++pass) {
+            Target best;
+            float bestDiff = 0.0f;
+            for (const Target& t : inTier) {
+                if (pass == 0 && Contains(exclude, t)) continue;
+                const Vec2 to = t.pos - from;
+                const float diff = std::fabs(WrapAngle(std::atan2(to.y, to.x) - facing));
+                if (best.kind == TargetKind::None || diff < bestDiff) {
+                    best = t;
+                    bestDiff = diff;
+                }
+            }
+            if (best.kind != TargetKind::None) return best;
+        }
+    }
+    return Target();
+}
+
+bool World::AnyLightOrBullet(const Vec2& from, float maxRange) const {
+    const float r2 = maxRange * maxRange;
+    for (const Enemy& e : enemies_) {
+        if (e.alive && e.cls == EnemyClass::Light && (e.pos - from).LengthSq() <= r2) return true;
+    }
+    for (const Bullet& b : enemyBullets_) {
+        if (b.alive && (b.pos - from).LengthSq() <= r2) return true;
+    }
+    return false;
+}
+
 std::vector<Target> World::TargetsOfSameKind(const Weapon* self) const {
     std::vector<Target> targets;
     for (const auto& w : weapons_) {
@@ -418,6 +455,7 @@ namespace {
         t.pos = e.pos;
         t.vel = e.vel;
         t.light = (e.cls == EnemyClass::Light);
+        t.medium = (e.cls == EnemyClass::Medium);
         return t;
     }
 }
@@ -522,6 +560,8 @@ Target World::FindTargetById(TargetKind kind, int id) const {
                 t.id = id;
                 t.pos = e.pos;
                 t.vel = e.vel;
+                t.light = (e.cls == EnemyClass::Light);
+                t.medium = (e.cls == EnemyClass::Medium);
                 break;
             }
         }
@@ -549,6 +589,28 @@ bool World::FindCrowdCenter(Vec2& center) const {
         Vec2 sum;
         for (const Enemy& o : enemies_) {
             if (o.alive && (o.pos - e.pos).LengthSq() <= r2) {
+                ++count;
+                sum += o.pos;
+            }
+        }
+        if (count > bestCount) {
+            bestCount = count;
+            center = sum * (1.0f / count);
+        }
+    }
+    return bestCount > 0;
+}
+
+bool World::FindMediumCrowdCenter(Vec2& center) const {
+    // 周り（CrowdRadius 以内）にいる中の敵が最も多い中の敵を探し、その周りの中の敵の平均の位置を中心とする
+    int bestCount = 0;
+    const float r2 = Config::CrowdRadius * Config::CrowdRadius;
+    for (const Enemy& e : enemies_) {
+        if (!e.alive || e.cls != EnemyClass::Medium) continue;
+        int count = 0;
+        Vec2 sum;
+        for (const Enemy& o : enemies_) {
+            if (o.alive && o.cls == EnemyClass::Medium && (o.pos - e.pos).LengthSq() <= r2) {
                 ++count;
                 sum += o.pos;
             }
